@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Catan">
+  <meta name="theme-color" content="#0a1220">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Catan Mobile</title>
+  <link rel="stylesheet" href="css/mobile.css">
+</head>
+<body>
+
+  <!-- LOADING -->
+  <div id="screen-loading" class="screen active">
+    <div class="loading-inner">
+      <div class="loading-spinner" id="loading-spinner"></div>
+      <p id="loading-msg">Connessione in corso…</p>
+      <div id="loading-actions" style="display:none;margin-top:20px;display:flex;flex-direction:column;gap:12px;align-items:center;">
+        <button id="btn-scan-qr" onclick="startQRScan()" style="display:none;padding:12px 28px;font-size:1.1rem;border-radius:12px;border:2px solid #50b450;background:rgba(80,180,80,.15);color:#80e080;font-weight:bold;">📷 Scansiona QR</button>
+        <button id="btn-enter-pin" onclick="showPINEntry()" style="padding:12px 28px;font-size:1.1rem;border-radius:12px;border:2px solid #c8a84b;background:rgba(200,168,75,.15);color:#c8a84b;font-weight:bold;">✏️ Inserisci PIN</button>
+        <div id="pin-entry" style="display:none;flex-direction:column;gap:10px;align-items:center;">
+          <input id="pin-input" type="number" maxlength="5" placeholder="PIN 5 cifre"
+            style="font-size:1.8rem;width:160px;text-align:center;padding:10px;border-radius:10px;border:2px solid #c8a84b;background:#1a1a2e;color:#fff;letter-spacing:4px;">
+          <button onclick="joinByPIN()" style="padding:10px 28px;font-size:1.1rem;border-radius:10px;border:2px solid #c8a84b;background:rgba(200,168,75,.3);color:#fff;font-weight:bold;">➡️ Entra</button>
+        </div>
+        <input id="qr-file-input" type="file" accept="image/*" capture="environment" style="display:none;" onchange="handleQRFile(event)">
+        <button id="btn-restart-mobile" onclick="restartMobile()" style="margin-top:6px;padding:10px 24px;font-size:1rem;border-radius:10px;border:1px solid #666;background:transparent;color:#aaa;" data-t="btn_restart">🔄 Riavvia</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- WAIT (not your turn) -->
+  <div id="screen-wait" class="screen">
+    <div class="wait-topbar">
+      <div class="wait-dot" id="wait-dot"></div>
+      <div class="wait-turn-text" id="wait-turn-text"></div>
+    </div>
+    <!-- Full-screen mini board -->
+    <div class="wait-board-wrap">
+      <canvas id="mini-canvas"></canvas>
+    </div>
+    <!-- My resources ribbon -->
+    <div class="my-resources-bar" id="my-resources-bar"></div>
+  </div>
+
+  <!-- ACTIVE TURN — board top, controls bottom sheet -->
+  <div id="screen-active" class="screen">
+
+    <!-- Guide button top-right -->
+    <button id="mob-btn-guide" onclick="showMobGuide()" style="
+      position:absolute;top:10px;right:10px;z-index:200;
+      width:36px;height:36px;border-radius:50%;
+      background:rgba(0,0,0,.45);border:1.5px solid rgba(255,255,255,.2);
+      color:rgba(255,255,255,.7);font-size:1rem;font-weight:bold;
+      display:flex;align-items:center;justify-content:center;cursor:pointer;">?</button>
+
+    <!-- Guide popup -->
+    <div id="mob-guide-popup" style="
+      display:none;position:fixed;inset:0;z-index:9000;
+      background:rgba(0,0,0,.75);align-items:center;justify-content:center;">
+      <div style="
+        background:#1a1a2e;border:2px solid #c8a84b;border-radius:16px;
+        padding:20px;max-width:340px;width:90%;max-height:80vh;overflow-y:auto;
+        color:#fff;font-size:.9rem;line-height:1.6;" onclick="event.stopPropagation()">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <strong id="mob-guide-title" style="color:#c8a84b;font-size:1.05rem"></strong>
+          <button onclick="document.getElementById('mob-guide-popup').style.display='none'"
+            style="background:none;border:none;color:#aaa;font-size:1.3rem;cursor:pointer;padding:0 4px;">✕</button>
+        </div>
+        <div id="mob-guide-content"></div>
+      </div>
+    </div>
+
+    <!-- Refresh button top-left -->
+    <button onclick="location.reload()" title="Ricarica" style="
+      position:absolute;top:10px;left:10px;z-index:200;
+      width:36px;height:36px;border-radius:50%;
+      background:rgba(0,0,0,.45);border:1.5px solid rgba(255,255,255,.2);
+      color:rgba(255,255,255,.6);font-size:1rem;line-height:1;
+      display:flex;align-items:center;justify-content:center;
+      cursor:pointer;">↺</button>
+
+    <!-- Players summary button -->
+    <button id="mob-btn-players-summary" onclick="showMobPlayersSummary()" title="Riepilogo giocatori" style="
+      position:absolute;top:10px;left:54px;z-index:200;
+      width:36px;height:36px;border-radius:50%;
+      background:rgba(0,0,0,.45);border:1.5px solid rgba(255,255,255,.2);
+      color:rgba(255,255,255,.7);font-size:1rem;line-height:1;
+      display:flex;align-items:center;justify-content:center;cursor:pointer;">👥</button>
+
+    <!-- Players summary popup -->
+    <div id="mob-players-summary-popup" style="
+      display:none;position:fixed;inset:0;z-index:9000;
+      background:rgba(0,0,0,.75);align-items:center;justify-content:center;">
+      <div style="
+        background:#1a1a2e;border:2px solid #c8a84b;border-radius:16px;
+        padding:20px;max-width:340px;width:90%;max-height:80vh;overflow-y:auto;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+          <strong style="color:#c8a84b;font-size:1.05rem">👥 Giocatori</strong>
+          <button onclick="document.getElementById('mob-players-summary-popup').style.display='none'"
+            style="background:none;border:none;color:#aaa;font-size:1.3rem;cursor:pointer;padding:0 4px">✕</button>
+        </div>
+        <div id="mob-players-summary-content"></div>
+      </div>
+    </div>
+
+    <!-- Board canvas (fills ~60% of screen) -->
+    <div id="mob-board-wrap">
+      <canvas id="mob-board-canvas"></canvas>
+      <!-- Build mode banner -->
+      <div id="mob-build-banner" class="mob-build-banner hidden"></div>
+    </div>
+
+    <!-- Bottom sheet -->
+    <div id="mob-sheet">
+
+      <!-- Sheet handle + player info -->
+      <div id="mob-sheet-header">
+        <div class="sheet-handle"></div>
+        <div id="mob-player-badge"></div>
+        <div id="mob-phase-label"></div>
+        <div id="mob-dice-row">
+          <span id="mob-die1" class="mob-die">?</span>
+          <span id="mob-die2" class="mob-die">?</span>
+        </div>
+        <div id="mob-setup-header-btns" class="hidden">
+          <button id="mob-hdr-undo"     class="mob-hdr-btn" onclick="send({type:'UNDO'})" disabled>↩</button>
+          <button id="mob-hdr-end-turn" class="mob-hdr-btn end" onclick="send({type:'SETUP_END_TURN'})" disabled>✔</button>
+        </div>
+      </div>
+
+      <!-- My resources (compact row) -->
+      <div id="mob-resources"></div>
+
+      <!-- Scrollable action area -->
+      <div id="mob-actions">
+
+        <!-- Setup instruction -->
+        <div id="mob-setup-panel" class="mob-panel">
+          <!-- State 1+2: place settlement or road -->
+          <div id="mob-setup-place-btns" class="mob-setup-btns">
+            <button id="mob-setup-btn-settlement" class="mob-big-btn" onclick="mobSetupPressSettlement()">
+              <span id="mob-setup-sett-label">Villaggio</span>
+            </button>
+            <button id="mob-setup-btn-road" class="mob-big-btn" onclick="mobSetupPressRoad()">
+              <span id="mob-setup-road-label">Strada</span>
+            </button>
+          </div>
+          <!-- State 3: confirm placement -->
+          <div id="mob-setup-confirm-btns" style="display:none">
+            <button class="mob-big-btn green" onclick="send({type:'SETUP_END_TURN'})">✔ <span data-t="mob_end_turn">Fine Turno</span></button>
+            <button class="mob-big-btn grey" style="margin-top:6px" onclick="send({type:'UNDO'});send({type:'UNDO'})">↩ <span data-t="mob_undo">Undo</span></button>
+          </div>
+        </div>
+
+        <!-- Roll dice -->
+        <div id="mob-roll-panel" class="mob-panel">
+          <button id="mob-btn-roll" class="mob-big-btn green">🎲 <span data-t="mob_roll">Roll Dice</span></button>
+        </div>
+
+        <!-- Build / Trade / Cards -->
+        <div id="mob-main-panel" class="mob-panel">
+          <div class="mob-action-grid">
+            <button id="mob-btn-road"       class="mob-build-btn">🛤<span data-t="mob_road" data-skin-label="road">Road</span><small data-res-cost="wood,brick">🪵+🧱</small></button>
+            <button id="mob-btn-settlement" class="mob-build-btn">🏠<span data-t="mob_settlement" data-skin-label="settlement">Settlement</span><small data-res-cost="wood,brick,sheep,wheat">🪵🧱🐑🌾</small></button>
+            <button id="mob-btn-city"       class="mob-build-btn">🏙<span data-t="mob_city" data-skin-label="city">City</span><small data-res-cost="wheat,wheat,ore,ore,ore">🌾🌾🪨🪨🪨</small></button>
+            <button id="mob-btn-devcard"    class="mob-build-btn">🃏<span data-t="mob_devcard">Dev Card</span><small data-res-cost="sheep,wheat,ore">🐑🌾🪨</small></button>
+            <button id="mob-btn-bank"       class="mob-build-btn">🏦<span data-t="mob_bank">Bank</span></button>
+            <button id="mob-btn-player"     class="mob-build-btn">🤝<span data-t="mob_trade">Trade</span></button>
+            <button id="mob-btn-play-dev"   class="mob-build-btn">🃏<span data-t="mob_use_card">Play Card</span></button>
+            <button id="mob-btn-undo"       class="mob-build-btn undo" disabled>↩<span data-t="mob_undo">Undo</span></button>
+            <button id="mob-btn-end-turn"   class="mob-build-btn end">▶<span data-t="mob_end_turn">End Turn</span></button>
+          </div>
+        </div>
+
+        <!-- Robber -->
+        <div id="mob-robber-panel" class="mob-panel">
+          <p class="mob-instruction" data-t="mob_robber_instruction" data-skin-label="mob_robber_instruction">🦹 Tap the board to move the robber</p>
+        </div>
+
+        <!-- Discard -->
+        <div id="mob-discard-panel" class="mob-panel">
+          <h3 id="mob-discard-title" class="mob-panel-title"></h3>
+          <p id="mob-discard-info" class="mob-panel-sub"></p>
+          <div id="mob-discard-resources"></div>
+          <button id="mob-btn-discard-confirm" class="mob-big-btn red" style="margin-top:10px" data-t="mob_discard_btn">Discard</button>
+        </div>
+
+        <!-- Steal -->
+        <div id="mob-steal-panel" class="mob-panel">
+          <p class="mob-instruction" data-t="mob_steal_instruction" data-skin-label="mob_steal_instruction">🦹 Steal a resource</p>
+          <div id="mob-steal-targets"></div>
+        </div>
+
+      </div><!-- /mob-actions -->
+
+      <!-- Wait overlay: shown when not my turn (NEVER destroys button DOM) -->
+      <div id="mob-wait-overlay" style="display:none;
+           position:absolute;inset:0;background:rgba(10,12,20,.82);
+           flex-direction:column;align-items:center;justify-content:center;
+           z-index:20;gap:10px;">
+        <div style="font-size:2.4rem">⏳</div>
+        <div id="mob-wait-who" style="font-size:1.1rem;font-weight:bold"></div>
+        <div id="mob-wait-what" style="font-size:.85rem;color:#c8b080"></div>
+      </div>
+
+    </div><!-- /mob-sheet -->
+
+  </div><!-- /screen-active -->
+
+  <!-- ── MODALS (bottom sheets) ── -->
+
+  <div id="mob-modal-bank" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2>🏦 <span data-t="mob_bank_title">Trade with Bank</span></h2>
+      <div class="mob-trade-cols">
+        <div><div class="mob-modal-label" data-t="mob_give">Give:</div><div id="mob-trade-give" class="mob-res-grid"></div></div>
+        <div class="mob-trade-arrow">⇄</div>
+        <div><div class="mob-modal-label" data-t="mob_receive">Receive:</div><div id="mob-trade-receive" class="mob-res-grid"></div></div>
+      </div>
+      <div id="mob-trade-ratio" class="mob-ratio-info"></div>
+      <div class="mob-modal-actions">
+        <button id="mob-btn-bank-confirm" class="mob-big-btn green" data-t="mob_swap">Trade</button>
+        <button class="mob-big-btn grey" onclick="closeMobModal('mob-modal-bank')" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mob-modal-player-trade" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2>🤝 <span data-t="mob_trade_title">Trade Offer</span></h2>
+      <div id="mob-trade-targets" class="mob-targets-row"></div>
+      <div id="mob-pt-rows"></div>
+      <div id="mob-pt-error" class="mob-error hidden"></div>
+      <div class="mob-modal-actions">
+        <button id="mob-btn-pt-send" class="mob-big-btn green" data-t="mob_propose">Propose</button>
+        <button class="mob-big-btn grey" onclick="closeMobModal('mob-modal-player-trade')" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mob-modal-accept" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2 id="mob-accept-title"></h2>
+      <div id="mob-accept-details"></div>
+      <div class="mob-modal-actions">
+        <button id="mob-btn-accept" class="mob-big-btn green" data-t="accept_btn">Accept</button>
+        <button id="mob-btn-reject" class="mob-big-btn red" data-t="reject_btn">Reject</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mob-modal-dev" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2>🃏 <span data-t="mob_dev_title">Play Dev Card</span></h2>
+      <div id="mob-dev-list"></div>
+      <button class="mob-big-btn grey" style="margin-top:10px" onclick="closeMobModal('mob-modal-dev')" data-t="cancel_btn">Cancel</button>
+    </div>
+  </div>
+
+  <div id="mob-modal-yop" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2>🌻 <span data-t="mob_yop_title">Year of Plenty</span></h2>
+      <p style="color:#c8b080;margin-bottom:12px" data-t="choose_2_yop">Choose 2 resources:</p>
+      <div id="mob-yop-res" class="mob-res-grid large"></div>
+      <div class="mob-modal-actions">
+        <button id="mob-btn-yop-confirm" class="mob-big-btn green" data-t="confirm_btn">Confirm</button>
+        <button class="mob-big-btn grey" onclick="closeMobModal('mob-modal-yop')" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="mob-modal-monopoly" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2>👑 <span data-t="mob_mono_title">Monopoly</span></h2>
+      <p style="color:#c8b080;margin-bottom:12px" data-t="monopoly_prompt">Choose a resource to claim:</p>
+      <div id="mob-mono-res" class="mob-res-grid large"></div>
+    </div>
+  </div>
+
+  <div id="mob-modal-winner" class="mob-modal">
+    <div class="mob-modal-inner winner">
+      <div id="mob-winner-content"></div>
+      <button onclick="location.reload()" class="mob-big-btn green" data-t="mob_new_game">New Game</button>
+    </div>
+  </div>
+
+  <!-- Dice overlay -->
+  <div id="mob-dice-overlay" class="mob-dice-overlay hidden">
+    <div class="mob-dice-wrap">
+      <div id="mob-big-d1" class="mob-big-die">?</div>
+      <div id="mob-big-d2" class="mob-big-die">?</div>
+    </div>
+    <div id="mob-dice-total" class="mob-dice-total"></div>
+  </div>
+
+  <script src="js/i18n.js"></script>
+  <script src="js/mobile.js"></script>
+  <script>
+    // Set language from URL immediately so error messages are localized
+    (function() {
+      const lang = new URLSearchParams(location.search).get('lang');
+      if (lang && ['en','it','fr','de'].includes(lang)) setLang(lang);
+    })();
+    // Apply translations to static HTML elements immediately on load
+    applyMobileTranslations();
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then(r => console.log('SW registered'))
+        .catch(e => console.warn('SW error', e));
+    }
+  </script>
+</body>
+</html>

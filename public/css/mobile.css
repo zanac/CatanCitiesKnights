@@ -1,0 +1,429 @@
+/* ================================================================
+   CATAN MOBILE CSS  — board on top, controls bottom sheet
+   ================================================================ */
+*, *::before, *::after { box-sizing: border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+html, body {
+  width:100%; height:100%; overflow:hidden;
+  font-family:'Georgia',serif; background:#0a1020; color:#f0e6c8;
+  font-size:15px;
+}
+.screen { display:none; width:100%; height:100%; position:fixed; inset:0; flex-direction:column; }
+.screen.active { display:flex; }
+
+/* ── Loading ── */
+#screen-loading { align-items:center; justify-content:center;
+  background:linear-gradient(160deg,#1a3a00,#3a1a00,#001a3a); }
+.loading-inner { text-align:center; }
+.loading-spinner { width:52px; height:52px; margin:0 auto 18px;
+  border:5px solid rgba(200,164,74,.2); border-top-color:#c8a44a;
+  border-radius:50%; animation:spin .8s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.loading-inner p { color:#c8b080; font-size:1rem; }
+
+/* ── Wait screen ── */
+#screen-wait { background:#0a1020; }
+.wait-topbar {
+  display:flex; align-items:center; gap:10px;
+  padding:10px 14px; background:rgba(0,0,0,.7);
+  border-bottom:1px solid rgba(200,164,74,.2);
+  flex-shrink:0;
+}
+.wait-dot { width:14px; height:14px; border-radius:50%; flex-shrink:0; }
+.wait-turn-text { font-size:.95rem; font-weight:bold; }
+.wait-board-wrap { flex:1; min-height:0; display:flex; align-items:center; justify-content:center; padding:8px; }
+#mini-canvas { max-width:100%; max-height:100%; }
+.my-resources-bar {
+  display:flex; flex-wrap:wrap; gap:6px; justify-content:center;
+  padding:10px 14px; background:rgba(0,0,0,.5);
+  border-top:1px solid rgba(255,255,255,.07); flex-shrink:0;
+}
+.mob-res-chip { display:flex; align-items:center; gap:4px;
+  background:rgba(255,255,255,.1); border-radius:8px; padding:4px 10px; font-size:.9rem; }
+
+/* ================================================================
+   ACTIVE TURN — board top + bottom sheet
+   ================================================================ */
+#screen-active { flex-direction:column; }
+
+/* ── Board area (top, ~55% of viewport) ── */
+#mob-board-wrap {
+  position:relative;
+  flex-shrink:0;
+  height:55svh; height:55vh;   /* fallback */
+  background:#0a1a2a;
+  overflow:hidden;
+  touch-action:none; /* we handle all touch ourselves */
+}
+#mob-board-canvas { display:block; width:100%; height:100%; }
+
+/* Build mode banner over the board */
+.mob-build-banner {
+  position:absolute; bottom:8px; left:50%; transform:translateX(-50%);
+  background:rgba(200,120,0,.92); color:#fff;
+  padding:7px 20px; border-radius:20px; font-size:.85rem; font-weight:bold;
+  pointer-events:none; white-space:nowrap;
+  box-shadow:0 2px 12px rgba(0,0,0,.5);
+}
+.mob-build-banner.hidden { display:none; }
+
+/* ── Bottom sheet ── */
+#mob-sheet {
+  flex:1; min-height:0;
+  display:flex; flex-direction:column;
+  background:#0f1520;
+  border-top:1.5px solid rgba(200,164,74,.3);
+  overflow:hidden;
+}
+#mob-sheet-header {
+  display:flex; align-items:center; gap:8px;
+  padding:7px 12px 6px; flex-shrink:0;
+  border-bottom:1px solid rgba(255,255,255,.07);
+}
+.sheet-handle {
+  width:32px; height:4px; border-radius:2px;
+  background:rgba(255,255,255,.2); flex-shrink:0; margin-right:4px;
+}
+#mob-player-badge {
+  padding:3px 10px; border-radius:14px;
+  border:2px solid currentColor; font-size:.82rem; font-weight:bold;
+  white-space:nowrap;
+}
+#mob-phase-label { flex:1; font-size:.75rem; color:#c8b080; text-align:center; }
+#mob-dice-row { display:flex; gap:5px; flex-shrink:0; }
+#mob-setup-header-btns { display:flex; gap:6px; flex-shrink:0; }
+#mob-setup-header-btns.hidden { display:none !important; }
+.mob-hdr-btn {
+  padding:5px 12px; border-radius:10px; font-size:.9rem; font-weight:bold;
+  border:1.5px solid rgba(180,180,200,.4); background:rgba(60,60,80,.7);
+  color:#ccc; cursor:pointer;
+}
+.mob-hdr-btn:disabled { opacity:.35; pointer-events:none; }
+.mob-hdr-btn.end {
+  border-color:rgba(100,200,100,.5); background:rgba(40,120,40,.4); color:#90e090;
+}
+.mob-die {
+  width:32px; height:32px; background:#fff; color:#222;
+  border-radius:6px; display:flex; align-items:center; justify-content:center;
+  font-size:1.35rem; font-weight:bold; line-height:1;
+  box-shadow:0 2px 5px rgba(0,0,0,.5);
+}
+
+/* ── Resources ── */
+#mob-resources {
+  display:flex; flex-wrap:wrap; gap:5px; justify-content:center;
+  padding:7px 10px; flex-shrink:0;
+  border-bottom:1px solid rgba(255,255,255,.06);
+}
+.mob-res-pill {
+  display:flex; align-items:center; gap:3px;
+  background:rgba(255,255,255,.09); border-radius:14px;
+  padding:4px 9px; font-size:.85rem;
+  border:1px solid rgba(255,255,255,.1);
+}
+.mob-res-pill .n { font-weight:bold; }
+.mob-res-pill.gained { background:rgba(255,200,50,.2); border-color:rgba(255,200,50,.5); }
+
+/* ── Action panels ── */
+#mob-actions {
+  flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch;
+  padding:10px 10px 14px;
+}
+.mob-panel { display:none; pointer-events:none; }
+.mob-panel.active { display:block; pointer-events:auto; }
+
+.mob-instruction { font-size:1rem; text-align:center; color:#f0c040; padding:12px 0 6px; }
+.mob-hint { font-size:.8rem; text-align:center; color:#c8b080; padding:0 20px 10px; line-height:1.5; }
+.mob-panel-title { color:#f0c040; font-size:1rem; margin-bottom:4px; }
+.mob-panel-sub   { font-size:.82rem; color:#c8b080; margin-bottom:10px; }
+
+/* ── 2×4 action grid ── */
+.mob-action-grid {
+  display:grid; grid-template-columns:1fr 1fr 1fr 1fr;
+  gap:6px;
+}
+.mob-build-btn {
+  display:flex; flex-direction:column; align-items:center;
+  gap:2px; padding:10px 4px;
+  background:rgba(255,255,255,.06);
+  border:1.5px solid rgba(200,164,74,.25);
+  border-radius:12px; color:#f0e6c8;
+  font-family:'Georgia',serif; font-size:.75rem;
+  cursor:pointer; transition:all .15s;
+}
+.mob-build-btn span { font-size:.72rem; text-align:center; }
+.mob-build-btn small { color:#c8b080; font-size:.65rem; }
+.mob-build-btn:active { transform:scale(.93); background:rgba(200,164,74,.2); }
+.mob-build-btn.cant-afford { opacity:.28; filter:grayscale(60%); }
+.mob-build-btn.active-mode { border-color:#f0c040; background:rgba(200,164,74,.25); color:#f0c040; }
+.mob-build-btn:disabled { opacity:.25; cursor:not-allowed; }
+.mob-build-btn.end { background:rgba(200,100,20,.3); border-color:rgba(200,100,20,.5); }
+.mob-build-btn.end:active { background:rgba(200,100,20,.5); }
+
+/* ── Big button ── */
+.mob-big-btn {
+  display:block; width:100%; padding:14px;
+  border-radius:12px; border:none; font-size:1.05rem;
+  font-family:'Georgia',serif; cursor:pointer;
+  transition:all .15s; margin-top:8px; font-weight:bold;
+}
+.mob-big-btn:active { transform:scale(.97); }
+.mob-big-btn.green  { background:#2a7a2a; color:#fff; }
+.mob-big-btn.red    { background:#7a2020; color:#fff; }
+.mob-big-btn.grey   { background:rgba(255,255,255,.1); color:#f0e6c8; }
+.mob-big-btn:disabled { opacity:.35; pointer-events:none; }
+.mob-setup-btns { display:flex; gap:10px; padding:8px 0; }
+.mob-setup-btns .mob-big-btn { flex:1; margin-top:0; background:rgba(200,164,74,.15); color:#f0c040; border:1.5px solid rgba(200,164,74,.4); }
+.mob-big-btn:disabled { opacity:.3; cursor:not-allowed; }
+
+/* ── Discard ── */
+#mob-discard-resources { display:flex; flex-direction:column; gap:7px; margin:10px 0; }
+.mob-discard-row { display:flex; align-items:center; justify-content:space-between;
+  padding:5px 0; border-bottom:1px solid rgba(255,255,255,.07); }
+.mob-discard-row label { font-size:.9rem; flex:1; }
+.mob-stepper { display:flex; align-items:center; gap:8px; }
+.mob-stepper button { width:36px; height:36px; border-radius:8px;
+  border:1.5px solid #c8a44a; background:transparent;
+  color:#f0e6c8; font-size:1.3rem; cursor:pointer; }
+.mob-stepper span { min-width:24px; text-align:center; font-size:1rem; }
+
+/* ── Steal targets ── */
+#mob-steal-targets { display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+.mob-steal-btn { padding:12px 14px; border-radius:10px;
+  border:2px solid rgba(255,255,255,.2); background:rgba(255,255,255,.07);
+  color:#f0e6c8; font-size:.95rem; font-family:'Georgia',serif; cursor:pointer;
+  text-align:left; display:flex; align-items:center; gap:8px; }
+.mob-steal-btn:active { background:rgba(200,164,74,.2); }
+
+/* ── Log ── */
+#mob-log { flex-shrink:0; padding:5px 12px 8px;
+  border-top:1px solid rgba(255,255,255,.06);
+  font-size:.7rem; color:#6a5a40; max-height:52px; overflow:hidden; }
+
+/* ================================================================
+   MODALS — slide up from bottom
+   ================================================================ */
+.mob-modal {
+  display:none; position:fixed; inset:0;
+  background:rgba(0,0,0,.75); z-index:100;
+  align-items:flex-end; justify-content:center;
+}
+.mob-modal.open { display:flex; }
+.mob-modal-inner {
+  background:#1a1200; border:1.5px solid #c8a44a;
+  border-radius:20px 20px 0 0;
+  padding:6px 16px 30px;
+  width:100%; max-width:480px; max-height:88vh; overflow-y:auto;
+}
+.mob-modal-drag {
+  width:36px; height:4px; border-radius:2px;
+  background:rgba(255,255,255,.2); margin:8px auto 14px;
+}
+.mob-modal-inner h2 { color:#f0c040; margin-bottom:14px; font-size:1.2rem; }
+.mob-modal-label { font-size:.78rem; color:#c8b080; margin-bottom:7px; }
+.mob-modal-actions { display:flex; gap:8px; margin-top:12px; }
+.mob-modal-actions .mob-big-btn { margin-top:0; }
+.mob-modal-inner.winner { text-align:center; padding-top:24px; }
+#mob-winner-content { font-size:1.2rem; margin-bottom:18px; line-height:2; }
+
+/* ── Resource grids in modals ── */
+.mob-res-grid { display:flex; flex-wrap:wrap; gap:7px; margin-bottom:8px; }
+.mob-res-btn {
+  display:flex; flex-direction:column; align-items:center; gap:3px;
+  padding:9px 7px; background:rgba(255,255,255,.07);
+  border:2px solid rgba(255,255,255,.15); border-radius:10px;
+  color:#f0e6c8; font-size:.78rem; min-width:54px;
+  cursor:pointer; font-family:'Georgia',serif; transition:all .15s;
+}
+.mob-res-btn .re { font-size:1.4rem; }
+.mob-res-btn.selected { border-color:#f0c040; background:rgba(200,164,74,.25); }
+.mob-res-btn:disabled { opacity:.28; }
+.mob-res-grid.large .mob-res-btn { min-width:66px; padding:12px 8px; }
+.mob-res-grid.large .mob-res-btn .re { font-size:1.8rem; }
+
+.mob-trade-cols { display:flex; align-items:flex-start; gap:8px; }
+.mob-trade-cols > div:not(.mob-trade-arrow) { flex:1; }
+.mob-trade-arrow { font-size:1.4rem; color:#c8a44a; align-self:center; }
+.mob-ratio-info { font-size:.78rem; color:#c8b080; margin-top:4px; }
+
+/* Player trade rows */
+.mob-pt-row { display:flex; align-items:center; gap:6px;
+  padding:7px 0; border-bottom:1px solid rgba(255,255,255,.07); }
+.mob-pt-emoji { font-size:1.2rem; flex-shrink:0; }
+.mob-pt-name  { flex:1; font-size:.8rem; color:#c8b080; }
+.mob-pt-col   { display:flex; flex-direction:column; align-items:center; gap:2px; min-width:76px; }
+.mob-pt-col-head { font-size:.6rem; color:#8a7a60; text-align:center; }
+
+.mob-targets-row { display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
+.mob-target-btn {
+  padding:7px 14px; border-radius:16px;
+  background:rgba(255,255,255,.07); border:2px solid rgba(255,255,255,.15);
+  color:#f0e6c8; cursor:pointer; font-size:.88rem; font-family:'Georgia',serif;
+}
+.mob-target-btn.active { border-color:var(--pcol,#c8a44a); background:rgba(255,255,255,.12); }
+
+.mob-error { background:rgba(200,50,50,.2); border:1px solid #aa3333;
+  border-radius:8px; padding:7px 10px; color:#ff8080; font-size:.82rem; margin-top:7px; }
+.mob-error.hidden { display:none; }
+
+/* ================================================================
+   DICE OVERLAY
+   ================================================================ */
+.mob-dice-overlay {
+  position:fixed; inset:0; z-index:200;
+  background:rgba(0,0,0,.75);
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:18px;
+}
+.mob-dice-overlay.hidden { display:none; }
+.mob-dice-wrap { display:flex; gap:18px; }
+.mob-big-die {
+  width:82px; height:82px; background:#fff; color:#111;
+  border-radius:14px; display:flex; align-items:center; justify-content:center;
+  font-size:3.5rem; line-height:1; font-weight:bold;
+  box-shadow:0 8px 28px rgba(0,0,0,.6);
+}
+.mob-big-die.rolling { animation:diceRoll .8s ease-in-out infinite; }
+.mob-big-die.landed  { animation:diceLand .3s ease-out;
+  box-shadow:0 8px 36px rgba(200,164,74,.6); }
+@keyframes diceRoll {
+  0%{transform:rotate(-12deg) scale(1.0)} 25%{transform:rotate(8deg) scale(1.05)}
+  50%{transform:rotate(-6deg) scale(.98)} 75%{transform:rotate(10deg) scale(1.03)}
+  100%{transform:rotate(-12deg) scale(1.0)}
+}
+@keyframes diceLand {
+  0%{transform:scale(1.25)} 60%{transform:scale(.93)} 100%{transform:scale(1)}
+}
+.mob-dice-total {
+  font-size:2rem; font-weight:bold; color:#f0c040;
+  opacity:0; transform:translateY(8px);
+  transition:opacity .3s, transform .3s;
+}
+.mob-dice-total.visible { opacity:1; transform:translateY(0); }
+.mob-dice-total.seven   { color:#ff6040; }
+
+::-webkit-scrollbar { width:3px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#5a4a2a; border-radius:2px; }
+
+/* Undo button */
+.mob-build-btn.undo { background: rgba(255,255,255,.08); color: #c8b080; }
+.mob-build-btn.undo:not(:disabled):hover { background: rgba(255,255,255,.15); }
+#mob-toast.toast-dev {
+  background: rgba(20,40,80,.97);
+  border: 2px solid #c8a44a;
+  color: #f0c040;
+  font-size: 1.1rem;
+}
+
+/* ── Resource gain badges on mobile ── */
+.mob-res-pill.gained {
+  background: rgba(255,200,50,.22);
+  border-color: rgba(255,200,50,.55);
+}
+.mob-res-gain {
+  font-size: .72rem; font-weight: bold; color: #70ff90;
+  margin-left: 2px;
+}
+
+/* ── Knight shortcut button in roll panel ── */
+.knight-btn {
+  margin-top: 12px;
+  background: rgba(80,160,80,.25);
+  border: 2px solid rgba(80,200,80,.5);
+  color: #90ffb0;
+}
+.knight-btn:active { background: rgba(80,160,80,.5); }
+.mob-build-btn.knight-ready {
+  border-color: #70ff90;
+  box-shadow: 0 0 6px rgba(80,200,80,.4);
+}
+
+#mob-toast.toast-special {
+  background: rgba(40,30,5,.97);
+  border: 2px solid #f0c040;
+  color: #f0c040;
+  font-size: 1rem;
+}
+
+#mob-toast.toast-points {
+  background: rgba(20,20,10,.97);
+  border: 2px solid #f0c040;
+  color: #f0e6c8;
+  font-size: .95rem;
+}
+
+/* ── Medal badges on mobile ── */
+.mob-medals-row {
+  display: flex; gap: 5px; align-items: center;
+  flex-wrap: wrap; justify-content: center;
+  padding: 0 8px 4px;
+}
+.mob-medal {
+  display: inline-flex; align-items: center;
+  font-size: .82rem; padding: 3px 8px;
+  border-radius: 16px; font-weight: bold;
+  white-space: nowrap;
+}
+.mob-medal.road-medal {
+  background: rgba(40,120,200,.25);
+  border: 1.5px solid rgba(80,160,255,.5);
+  color: #a0d0ff;
+}
+.mob-medal.army-medal {
+  background: rgba(180,50,50,.25);
+  border: 1.5px solid rgba(255,100,80,.5);
+  color: #ffb090;
+}
+.mob-medal.knight-count {
+  background: rgba(80,80,100,.2);
+  border: 1px solid rgba(160,160,180,.35);
+  color: #c0c0e0;
+  font-size: .75rem;
+}
+
+/* ── Sheet collapse during board placement ── */
+#mob-board-wrap {
+  transition: height .28s ease;
+}
+#mob-sheet {
+  transition: height .28s ease;
+}
+#mob-board-wrap.board-expanded {
+  height: 78vh !important;
+}
+.sheet-collapsed {
+  height: 22vh !important;
+  overflow: hidden;
+}
+.sheet-collapsed .mob-panel { display: none !important; }
+.sheet-collapsed #mob-build-banner { display: flex !important; }
+.sheet-collapsed #mob-resources { display: flex !important; }
+.sheet-collapsed #mob-sheet-header { display: flex !important; }
+.sheet-collapsed #mob-log { display: none !important; }
+
+/* ================================================================
+   GAIN-BLOCKING — disable all actions during resource popup
+   ================================================================ */
+body.gain-blocking #mob-btn-roll,
+body.gain-blocking #mob-btn-end-turn,
+body.gain-blocking #mob-btn-build,
+body.gain-blocking #mob-btn-trade,
+body.gain-blocking #mob-btn-devcard,
+body.gain-blocking #mob-btn-play-dev,
+body.gain-blocking #mob-action-bar,
+body.gain-blocking #board-canvas {
+  pointer-events: none;
+  opacity: 0.4;
+  filter: grayscale(60%);
+}
+body.gain-blocking #mob-gain-banner,
+body.gain-blocking #gain-dismiss,
+body.gain-blocking #gain-popups {
+  pointer-events: auto;
+  opacity: 1;
+  filter: none;
+}
+body.gain-blocking #board-canvas {
+  opacity: 1;
+  filter: none;
+}

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Catan — Spectator</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* Spectator: hide all controls, show only board + players */
+    #hud-top .action-btn, #hud-top #btn-roll, #hud-top #btn-end-turn,
+    #hud-top #btn-undo, #hud-top #btn-reset,
+    #drawer-actions, #tab-actions,
+    #log-fab, #log-panel,
+    #gain-dismiss, #gain-popups,
+    #dice-display, #dice-overlay,
+    .modal { display: none !important; }
+
+    /* Spectator PIN badge */
+    #spectator-badge {
+      position: fixed; top: 10px; right: 10px;
+      background: rgba(10,12,20,.9);
+      border: 1.5px solid rgba(200,164,74,.4);
+      border-radius: 10px; padding: 6px 14px;
+      font-size: .85rem; color: #c8b080;
+      z-index: 50;
+    }
+    #spectator-badge strong { color: #f0c040; letter-spacing: 2px; }
+
+    /* Spectator: board fills remaining space after players panel */
+    #drawer-players { display: flex !important; }
+    #drawer-players .drawer-tab { display: none !important; } /* no toggle needed */
+    /* TV-safe: larger resource badges */
+    .res-badge { font-size: 1.1rem !important; }
+    @keyframes fadeInUp {
+      from { opacity:0; transform:translateX(-50%) translateY(16px); }
+      to   { opacity:1; transform:translateX(-50%) translateY(0); }
+    }
+
+    /* Spectator label */
+    #spectator-label {
+      position: fixed; bottom: 14px; left: 50%;
+      transform: translateX(-50%);
+      background: rgba(10,12,20,.85);
+      border: 1px solid rgba(200,164,74,.25);
+      border-radius: 20px; padding: 5px 18px;
+      font-size: .78rem; color: #5a4a2a;
+      pointer-events: none; z-index: 30;
+    }
+  </style>
+</head>
+<body>
+  <div id="setup-screen" class="screen active" style="display:none"></div>
+
+  <div id="game-screen" class="screen active">
+    <canvas id="board-canvas"></canvas>
+
+    <div id="hud-top">
+      <div id="turn-indicator"></div>
+      <div id="dice-display">
+        <span id="die1" class="die">?</span>
+        <span id="die2" class="die">?</span>
+      </div>
+      <div id="phase-actions"></div>
+    </div>
+
+    <div id="drawer-players" class="drawer drawer-left open">
+      <button class="drawer-tab drawer-tab-left" id="tab-players">
+        <span class="tab-icon">👥</span>
+        <span class="tab-label">Players</span>
+      </button>
+      <div class="drawer-body" id="players-panel"></div>
+    </div>
+
+    <div id="drawer-actions" class="drawer drawer-right" style="display:none"></div>
+
+    <div id="log-fab" style="display:none"></div>
+    <div id="log-panel" class="log-panel hidden">
+      <div class="log-header"><span>Log</span></div>
+      <div id="game-log"></div>
+    </div>
+
+    <div id="robber-banner" class="banner hidden"></div>
+    <div id="setup-banner"  class="banner hidden"></div>
+    <div id="dice-overlay"  class="dice-overlay hidden">
+      <div class="dice-overlay-inner">
+        <div class="dice-big-wrap">
+          <div id="dice-big-1" class="dice-big">?</div>
+          <div id="dice-big-2" class="dice-big">?</div>
+        </div>
+        <div id="dice-sum" class="dice-sum"></div>
+      </div>
+    </div>
+
+    <div id="gain-popups"></div>
+    <div id="gain-dismiss" class="gain-dismiss" style="display:none"></div>
+
+    <div id="spectator-badge">📺 <strong id="spec-pin"></strong>
+      <button onclick="showSpectatorQR()" style="background:none;border:none;cursor:pointer;font-size:1rem;padding:0 4px;opacity:.8">🔗</button>
+    </div>
+
+
+
+  </div>
+
+  <!-- Minimal modals needed for rendering (won't be opened) -->
+  <div id="modal-trade-bank"   class="modal"></div>
+  <div id="modal-discard"      class="modal"></div>
+  <div id="modal-steal"        class="modal"></div>
+  <div id="modal-dev-play"     class="modal"></div>
+  <div id="modal-yop"          class="modal"></div>
+  <div id="modal-monopoly"     class="modal"></div>
+  <div id="modal-trade-player" class="modal"></div>
+  <div id="modal-trade-accept" class="modal"></div>
+  <div id="modal-winner"       class="modal"></div>
+
+  <script src="js/i18n.js"></script>
+  <script>
+    // TV/Silk: flag for canvas emoji fallback
+    window.__TV_MODE = /Silk|SMART-TV|Tizen|WebOS|BRAVIA/i.test(navigator.userAgent);
+    // Spectator: hide players drawer inset so board fills full width
+    window.__SPECTATOR_MODE = true;
+  </script>
+  <script src="js/main.js"></script>
+  <script>
+    // TV/Silk browser: detect missing emoji support and use text fallback
+    (function patchEmojiForTV() {
+      const isSilk = /Silk/i.test(navigator.userAgent);
+      const isTV   = /TV|SmartTV|SMART-TV|Tizen|WebOS|BRAVIA|NetCast/i.test(navigator.userAgent);
+      if (!isSilk && !isTV) return;
+      // RES_EMOJI override removed — resEmoji() reads from skin
+    })();
+  </script>
+  <script>
+    // Override functions that require interaction
+    window.toggleDrawer    = () => {};
+    window.closeAllModals  = () => {};
+    window.openModal       = () => {};
+    window.checkModals     = () => {};
+
+    // Spectator: always ensure canvas fills the screen on every render
+    const _origRender = window.render;
+    window.render = function() {
+      if (typeof canvas !== 'undefined' && canvas) {
+        canvas.width  = window.innerWidth;
+        canvas.height = window.innerHeight;
+      }
+      // Remove any blocking classes left by gain popup
+      document.body.classList.remove('gain-blocking');
+      const dismiss = document.getElementById('gain-dismiss');
+      if (dismiss) dismiss.classList.remove('visible');
+      if (_origRender) _origRender();
+    };
+
+    // Spectator: preload skin on STATE_UPDATE, show gain toast on dice roll
+    window._onMessageHook = function(data) {
+      if (data.type !== 'STATE_UPDATE' || !data.state) return;
+
+      const skinId = data.state.skinId;
+      const skinReady = SKIN?.id === skinId;
+
+      if (!data.state.diceRolled) {
+        // Preload skin in background (loadSkinAssets now skips render in spectator mode)
+        if (!skinReady && typeof loadSkinAssets === 'function') loadSkinAssets(skinId);
+        return;
+      }
+
+      // Dice rolled — ensure skin loaded then show toast
+      if (!skinReady && typeof loadSkinAssets === 'function') {
+        loadSkinAssets(skinId).then(() => showSpectatorGainToast(data.state));
+      } else {
+        showSpectatorGainToast(data.state);
+      }
+    };
+
+    function showSpectatorGainToast(gameState) {
+      const total = (gameState.diceValues?.[0]||0) + (gameState.diceValues?.[1]||0);
+      if (!total) return;
+
+      // Calculate gains
+      const gains = {};
+      for (const hex of gameState.board.hexes) {
+        if (hex.number !== total || hex.id === gameState.robberHexId) continue;
+        for (const vid of hex.vertices) {
+          const v = gameState.board.vertices[vid];
+          if (v.owner === null) continue;
+          const amt = v.building === 'city' ? 2 : 1;
+          if (!gains[v.owner]) gains[v.owner] = {};
+          gains[v.owner][hex.resource] = (gains[v.owner][hex.resource]||0) + amt;
+        }
+      }
+      if (!Object.keys(gains).length) return;
+
+      // Build toast HTML
+      const lines = Object.entries(gains).map(([pid, g]) => {
+        const p = gameState.players[pid];
+        const res = Object.entries(g).map(([r,n]) => `${n}×${resEmoji(r)}`).join(' ');
+        return `<span style="color:${p.color};font-weight:bold">${p.name}</span>: ${res}`;
+      });
+
+      // Remove existing toast
+      document.getElementById('spec-gain-toast')?.remove();
+      const toast = document.createElement('div');
+      toast.id = 'spec-gain-toast';
+      toast.style.cssText = `
+        position:fixed; bottom:60px; left:50%; transform:translateX(-50%);
+        background:rgba(10,15,30,.92); border:1.5px solid rgba(200,164,74,.5);
+        border-radius:14px; padding:12px 22px; z-index:200;
+        color:#f0e6c8; font-size:1rem; text-align:center;
+        box-shadow:0 4px 24px rgba(0,0,0,.5);
+        animation: fadeInUp .3s ease;
+      `;
+      toast.innerHTML = `<div style="font-size:.8rem;color:#c8a44a;margin-bottom:6px">🎲 ${total}</div>` +
+        lines.map(l => `<div>${l}</div>`).join('');
+      document.body.appendChild(toast);
+
+      // Auto-remove after 4s
+      setTimeout(() => {
+        toast.style.transition = 'opacity .5s';
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 500);
+      }, 30000);
+    }
+
+
+    window.showWinner      = () => {
+      // Show winner in a non-blocking overlay
+      if (!state?.winner) return;
+      const w = state.players[state.winner];
+      let el = document.getElementById('spectator-winner');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'spectator-winner';
+        el.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;' +
+          'background:rgba(0,0,0,.6);z-index:200;pointer-events:none;';
+        document.body.appendChild(el);
+      }
+      el.innerHTML = `<div style="text-align:center;color:#f0c040;font-size:3rem">
+        🏆<br><span style="color:${w.color}">${w.name}</span><br>
+        <span style="font-size:1.5rem">${w.points} points</span>
+      </div>`;
+    };
+
+    // Spectator: auto-connect to PIN from URL, no room creation
+    (async function initSpectator() {
+      const params = new URLSearchParams(location.search);
+      const pin  = params.get('pin');
+      const lang = params.get('lang');
+      if (!pin) { document.body.innerHTML = '<div style="color:#c8a44a;padding:40px;font-size:1.5rem">Missing PIN in URL. Use ?pin=XXXXX</div>'; return; }
+      // Apply language
+      if (lang && ['en','it','fr','de'].includes(lang)) {
+        setLang(lang);
+        applyTranslations();
+      }
+      document.getElementById('spec-pin').textContent = pin;
+      currentPin = pin;
+      connectWS();
+      // Force canvas resize on first render
+      window.addEventListener('resize', () => {
+        if (typeof canvas !== 'undefined') {
+          canvas.width  = window.innerWidth;
+          canvas.height = window.innerHeight;
+          if (typeof render === 'function' && state) render();
+        }
+      });
+      // Keep players drawer open
+      const drawer = document.getElementById('drawer-players');
+      if (drawer) { drawer.classList.add('open'); document.getElementById('tab-players')?.classList.add('open'); }
+    })();
+  </script>
+</body>
+</html>

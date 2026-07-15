@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0a1220">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Catan</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════ SETUP ══ -->
+  <div id="setup-screen" class="screen active">
+    <div class="setup-container">
+      <h1 class="catan-title" data-t="title">⚔️ The Settlers of Catan</h1>
+      <p class="subtitle" data-t="subtitle">Select number of players and their names</p>
+
+      <!-- Language selector -->
+      <div class="lang-selector">
+        <span data-t="lang_label">Language:</span>
+        <button class="lang-btn active" data-lang="en">🇬🇧 English</button>
+        <button class="lang-btn" data-lang="it">🇮🇹 Italiano</button>
+        <button class="lang-btn" data-lang="fr">🇫🇷 Français</button>
+        <button class="lang-btn" data-lang="de">🇩🇪 Deutsch</button>
+      </div>
+
+      <!-- Player count -->
+      <div class="player-count-selector">
+        <span data-t="players_label">Players:</span>
+        <button class="count-btn active" data-count="3">3</button>
+        <button class="count-btn" data-count="4">4</button>
+      </div>
+
+      <!-- UI scale -->
+      <div class="scale-selector">
+        <span data-t="ui_size_label">UI Size:</span>
+        <button class="scale-btn" data-scale="1">
+          <span class="scale-icon">🖥</span>
+          <span class="scale-label" data-t="ui_standard">Standard</span>
+        </button>
+        <button class="scale-btn" data-scale="1.7">
+          <span class="scale-icon">📺</span>
+          <span class="scale-label" data-t="ui_large">Large +70%</span>
+        </button>
+        <button class="scale-btn active" data-scale="2">
+          <span class="scale-icon">🖼</span>
+          <span class="scale-label" data-t="ui_maxi">Maxi +100%</span>
+        </button>
+      </div>
+
+      <!-- Join existing room by PIN -->
+      <div class="join-pin-section">
+        <div class="join-pin-row">
+          <span class="join-pin-label" id="lbl-join-pin" data-t="join_existing">Join existing game:</span>
+          <input type="text" id="join-pin-input" maxlength="5" placeholder="12345" class="join-pin-input">
+          <button id="btn-join-pin" class="join-pin-btn" data-t="join_btn">→ Join</button>
+        </div>
+        <div id="join-pin-error" class="join-pin-error hidden"></div>
+      </div>
+
+      <!-- Player configs (name + color) rendered by JS -->
+      <div id="player-configs"></div>
+
+      <!-- Skin selector -->
+      <div class="skin-selector" id="skin-selector" style="display:none">
+        <span data-t="skin_label">Skin:</span>
+        <div id="skin-cards" class="skin-cards"></div>
+      </div>
+
+      <!-- Debug dev card selector (shown only with ?debug=1 in URL) -->
+      <div id="debug-dev-section" style="display:none;text-align:center;margin:8px 0">
+        <span style="color:#ff6030;font-size:.8rem">🐛 Debug: prima carta sviluppo</span>
+        <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-top:6px">
+          <button class="rule-btn active" onclick="setDebugCard(null)" id="dbg-none">Off</button>
+          <button class="rule-btn" onclick="setDebugCard('monopoly')" id="dbg-monopoly">👑 Monopolio</button>
+          <button class="rule-btn" onclick="setDebugCard('knight')" id="dbg-knight">⚔️ Cavaliere</button>
+          <button class="rule-btn" onclick="setDebugCard('roadBuilding')" id="dbg-road">🛤 Strade</button>
+          <button class="rule-btn" onclick="setDebugCard('yearOfPlenty')" id="dbg-yop">🌻 Abbondanza</button>
+          <button class="rule-btn" onclick="setDebugCard('victoryPoint')" id="dbg-vp">⭐ Vittoria</button>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px">
+          <button class="rule-btn" id="dbg-res" onclick="toggleDebugRes()">💰 10 risorse iniziali</button>
+          <select id="dbg-dice" onchange="setDebugDice(this.value)" style="background:#1a1200;color:#f0c040;border:1.5px solid rgba(200,164,74,.4);border-radius:8px;padding:6px 10px;cursor:pointer">
+            <option value="">🎲 Dado libero</option>
+            <option value="2">🎲 Forza 2</option>
+            <option value="3">🎲 Forza 3</option>
+            <option value="4">🎲 Forza 4</option>
+            <option value="5">🎲 Forza 5</option>
+            <option value="6">🎲 Forza 6</option>
+            <option value="7">🎲 Forza 7 (bandito)</option>
+            <option value="8">🎲 Forza 8</option>
+            <option value="9">🎲 Forza 9</option>
+            <option value="10">🎲 Forza 10</option>
+            <option value="11">🎲 Forza 11</option>
+            <option value="12">🎲 Forza 12</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Zero resources rule -->
+      <div class="rule-selector">
+        <span data-t="rule_label">Rules:</span>
+        <button class="rule-btn active" data-rule="zero-resources" id="btn-zero-res" data-t="rule_zero_res">🏁 Start without resources</button>
+        <button class="rule-btn" data-rule="random-ports" id="btn-random-ports" data-t="rule_random_ports">🎲 Random ports</button>
+        <button class="rule-btn" data-rule="random-numbers" id="btn-random-numbers" data-t="rule_random_numbers">🔢 Random numbers</button>
+        <button class="rule-btn" id="btn-quick-game" data-t="rule_quick_game">⚡ Quick Game</button>
+        <button class="rule-btn active" id="btn-unlimited-dev" data-t="rule_unlimited_dev">🎴 Sviluppi Infiniti</button>
+        <button class="rule-btn" id="btn-instant-dev" data-t="rule_instant_dev">⚡ Carte Istantanee</button>
+        <button class="rule-btn active" id="btn-hidden-res" data-t="rule_hidden_res">🙈 Risorse Nascoste</button>
+        <button class="rule-btn" id="btn-balanced-res" data-t="rule_balanced_res">⚖️ Risorse Bilanciate</button>
+      </div>
+
+      <!-- Desert -->
+      <div class="desert-selector">
+        <span data-t="desert_label">Desert:</span>
+        <button class="desert-btn" data-desert="random" data-t="desert_random">🎲 Random</button>
+        <button class="desert-btn active" data-desert="center" data-t="desert_center">🏜 Center</button>
+      </div>
+
+      <button id="start-btn" class="big-btn primary" data-t="start_btn">🎲 Start Game</button>
+      <button id="phone-host-btn" class="big-btn" style="display:none;background:rgba(80,180,80,.2);border-color:#50b450;color:#80e080" onclick="startPhoneHost()" data-t="phone_host_btn">📱 Gioca da telefono</button>
+    </div>
+  </div>
+
+  <!-- PHONE HOST SCREEN -->
+  <div id="waiting-screen" class="screen">
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;gap:20px;text-align:center;padding:24px">
+      <div style="font-size:3rem">⏳</div>
+      <div style="font-size:1.4rem;color:#f0c040;font-family:Georgia,serif" data-t="waiting_game_start">In attesa che la partita inizi...</div>
+      <div id="waiting-player-name" style="font-size:1rem;color:#c8b080"></div>
+      <div style="width:48px;height:4px;background:rgba(200,164,74,.2);border-radius:2px;overflow:hidden;margin-top:8px">
+        <div style="height:100%;background:#f0c040;border-radius:2px;animation:wait-pulse 1.5s ease-in-out infinite"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="phone-host-screen" class="screen">
+    <div id="ph-container">
+      <div id="ph-header">
+        <div id="ph-title">📱 Catan — Solo Telefono</div>
+        <div id="ph-phase"></div>
+      </div>
+      <div id="ph-pin-block">
+        <div id="ph-pin-label">PIN partita</div>
+        <div id="ph-pin-value"></div>
+      </div>
+      <div id="ph-players"></div>
+      <div id="ph-status"></div>
+      <button id="ph-reset-btn" onclick="phReset()">↺ Nuova Partita</button>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════ GAME ══ -->
+  <div id="game-screen" class="screen">
+
+    <canvas id="board-canvas"></canvas>
+
+    <!-- Top HUD -->
+    <div id="hud-top">
+      <div id="turn-indicator"></div>
+      <div id="dice-display">
+        <span id="die1" class="die">?</span>
+        <span id="die2" class="die">?</span>
+      </div>
+      <div id="phase-actions">
+        <button id="btn-roll"     class="action-btn green"      data-t="roll_dice">🎲 Roll Dice</button>
+        <button id="btn-end-turn" class="action-btn orange"     data-t="end_turn">▶ End Turn</button>
+        <button id="btn-undo"     class="action-btn grey small" id="btn-undo">↩ Undo</button>
+        <button id="btn-reset"    class="action-btn red small"  data-t="reset">↺ Reset</button>
+      </div>
+    </div>
+
+    <!-- Left drawer: Players -->
+    <div id="drawer-players" class="drawer drawer-left">
+      <button class="drawer-tab drawer-tab-left" id="tab-players" onclick="toggleDrawer('players')">
+        <span class="tab-icon">👥</span>
+        <span class="tab-label" data-t="tab_players">Players</span>
+      </button>
+      <div class="drawer-body" id="players-panel"></div>
+    </div>
+
+    <!-- Right drawer: Actions -->
+    <div id="drawer-actions" class="drawer drawer-right">
+      <button class="drawer-tab drawer-tab-right" id="tab-actions" onclick="toggleDrawer('actions')">
+        <span class="tab-icon">🔨</span>
+        <span class="tab-label" data-t="tab_actions">Actions</span>
+      </button>
+      <div class="drawer-body">
+        <div class="drawer-section-title" id="sec-build" data-t="sec_build">BUILD</div>
+        <button id="btn-road"       class="build-btn"><span data-t="btn_road" data-skin-label="road">🛤 Road</span>        <small data-res-cost="wood,brick">🪵+🧱</small></button>
+        <button id="btn-settlement" class="build-btn"><span data-t="btn_settlement" data-skin-label="settlement">🏠 Settlement</span>   <small data-res-cost="wood,brick,sheep,wheat">🪵🧱🐑🌾</small></button>
+        <button id="btn-city"       class="build-btn"><span data-t="btn_city" data-skin-label="city">🏙 City</span>          <small data-res-cost="wheat,wheat,ore,ore,ore">🌾🌾🪨🪨🪨</small></button>
+        <button id="btn-devcard"    class="build-btn"><span data-t="btn_devcard" data-skin-label="devcard">🃏 Dev Card</span>      <small data-res-cost="sheep,wheat,ore">🐑🌾🪨</small></button>
+        <div class="drawer-section-title" style="margin-top:14px" data-t="sec_trade">TRADE</div>
+        <button id="btn-trade-bank"   class="build-btn" data-t="btn_bank">🏦 Bank</button>
+        <button id="btn-trade-player" class="build-btn" data-t="btn_players_trade">🤝 Players</button>
+        <div class="drawer-section-title" style="margin-top:14px" data-t="sec_cards">CARDS</div>
+        <button id="btn-play-dev" class="build-btn" data-t="btn_play_dev">🃏 Play Dev Card</button>
+      </div>
+    </div>
+
+    <!-- Log: floating icon bottom-right, expands on tap -->
+    <div id="log-fab" onclick="toggleLog()">📜</div>
+    <div id="log-panel" class="log-panel hidden">
+      <div class="log-header">
+        <span data-t="tab_log">Log</span>
+        <button class="log-close" onclick="toggleLog()">✕</button>
+      </div>
+      <div id="game-log"></div>
+    </div>
+
+    <!-- Banners -->
+    <div id="robber-banner" class="banner hidden" data-t="banner_robber" data-skin-label="robber">🦹 Move the robber! Tap a hex.</div>
+    <div id="setup-banner" class="banner hidden"></div>
+
+    <!-- Dice overlay -->
+    <div id="dice-overlay" class="dice-overlay hidden">
+      <div class="dice-overlay-inner">
+        <div class="dice-big-wrap">
+          <div id="dice-big-1" class="dice-big">?</div>
+          <div id="dice-big-2" class="dice-big">?</div>
+        </div>
+        <div id="dice-sum" class="dice-sum"></div>
+      </div>
+    </div>
+
+    <div id="gain-popups"></div>
+    <div id="gain-dismiss" class="gain-dismiss">
+      <span data-t="tap_continue">Tap to continue ▶</span>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════ MODALS ══ -->
+
+  <div id="modal-trade-bank" class="modal">
+    <div class="modal-content">
+      <h2 data-t="bank_trade_title">🏦 Trade with Bank</h2>
+      <div class="trade-section"><label data-t="give_label">Give:</label><div class="resource-picker" id="trade-give"></div></div>
+      <div class="trade-section"><label data-t="receive_label">Receive:</label><div class="resource-picker" id="trade-receive"></div></div>
+      <div class="trade-ratio-info" id="trade-ratio-info"></div>
+      <div class="modal-actions">
+        <button id="btn-trade-confirm" class="big-btn primary" data-t="trade_btn">Trade</button>
+        <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-discard" class="modal">
+    <div class="modal-content">
+      <h2 id="discard-title"></h2>
+      <p id="discard-info"></p>
+      <div id="discard-resources"></div>
+      <div class="modal-actions">
+        <button id="btn-discard-confirm" class="big-btn primary" data-t="discard_btn">Discard</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-steal" class="modal">
+    <div class="modal-content">
+      <h2 data-t="steal_title">🦹 Steal a resource</h2>
+      <p data-t="steal_prompt">Choose who to steal from:</p>
+      <div id="steal-targets"></div>
+    </div>
+  </div>
+
+  <div id="modal-dev-play" class="modal">
+    <div class="modal-content">
+      <h2 data-t="devcard_title">🃏 Play a Dev Card</h2>
+      <div id="dev-cards-list"></div>
+      <div class="modal-actions">
+        <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-yop" class="modal">
+    <div class="modal-content">
+      <h2 data-t="yop_title" data-skin-label="yop_title">🌻 Year of Plenty</h2>
+      <p data-t="yop_prompt">Choose 2 resources:</p>
+      <div id="yop-resources" class="resource-picker-row"></div>
+      <div class="modal-actions">
+        <button id="btn-yop-confirm" class="big-btn primary" data-t="confirm_btn">Confirm</button>
+        <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-monopoly" class="modal">
+    <div class="modal-content">
+      <h2 data-t="monopoly_title" data-skin-label="monopoly_title">👑 Monopoly</h2>
+      <p data-t="monopoly_prompt">Choose a resource to claim:</p>
+      <div id="monopoly-resources" class="resource-picker-row"></div>
+    </div>
+  </div>
+
+  <div id="modal-trade-player" class="modal">
+    <div class="modal-content" style="max-width:580px">
+      <h2 data-t="trade_title">🤝 Trade Offer</h2>
+      <div id="player-trade-offer"></div>
+      <div id="player-trade-want" style="display:none"></div>
+      <div id="trade-error" style="display:none;color:#ff8080;margin-top:8px;font-size:.9rem"></div>
+      <div id="player-trade-targets"></div>
+      <div class="modal-actions">
+        <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-trade-accept" class="modal">
+    <div class="modal-content">
+      <h2 id="trade-accept-title"></h2>
+      <div id="trade-accept-details"></div>
+      <div class="modal-actions">
+        <button id="btn-trade-accept" class="big-btn primary" data-t="accept_btn">Accept</button>
+        <button id="btn-trade-reject" class="big-btn" data-t="reject_btn">Reject</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-winner" class="modal">
+    <div class="modal-content winner-modal">
+      <div id="winner-content"></div>
+      <button onclick="location.reload()" class="big-btn primary" data-t="new_game_btn">New Game</button>
+    </div>
+  </div>
+
+  <!-- QR Modal -->
+  <div id="modal-qr" class="modal">
+    <div class="modal-content add-player-modal">
+      <h2 id="qr-title" data-t="add_player_title">➕ Add a player</h2>
+      <p id="qr-player-name" class="qr-player-name"></p>
+
+      <!-- Phone tab -->
+      <div id="qr-tab-phone" class="qr-tab active">
+        <div class="qr-tab-btns">
+          <button class="qr-tab-btn active" onclick="switchQRTab('phone')">📱 Phone</button>
+          <button class="qr-tab-btn" onclick="switchQRTab('web')">💻 Web link</button>
+        </div>
+        <img id="qr-image" class="qr-img" alt="QR">
+        <p class="qr-scan-hint" data-t="qr_scan_hint">Scan with your phone camera</p>
+        <div class="qr-link-box">
+          <span id="qr-url" class="qr-url-text"></span>
+          <button class="qr-copy-btn" onclick="copyQRLink('mobile')" id="qr-copy-btn">📋 Copy</button>
+        </div>
+      </div>
+
+      <!-- Web link tab -->
+      <div id="qr-tab-web" class="qr-tab hidden">
+        <div class="qr-tab-btns">
+          <button class="qr-tab-btn" onclick="switchQRTab('phone')">📱 Phone</button>
+          <button class="qr-tab-btn active" onclick="switchQRTab('web')">💻 Web link</button>
+        </div>
+        <div class="web-link-box">
+          <p class="web-link-desc" data-t="web_link_desc">Open this link on a PC or tablet to play as this player in the browser — with full turn management and trade support.</p>
+          <div class="qr-link-box">
+            <span id="qr-web-url" class="qr-url-text"></span>
+            <button class="qr-copy-btn" onclick="copyQRLink('web')" id="qr-copy-web-btn">📋 Copy</button>
+          </div>
+          <button class="big-btn secondary" onclick="window.open(document.getElementById('qr-web-url').textContent,'_blank')">🔗 Open now</button>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="justify-content:center;margin-top:10px">
+        <button class="big-btn primary" onclick="closeAllModals()" data-t="done_btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/i18n.js"></script>
+  <script src="js/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then(() => console.log('SW registered'))
+        .catch(e => console.warn('SW error', e));
+    }
+
+    // ── PWA Install Prompt ─────────────────────────────────────────
+    (function() {
+      // Don't show if already installed or previously dismissed
+      const isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+      if (isStandalone) return;
+      try { if (localStorage.getItem('pwa_dismissed')) return; } catch(e) {}
+
+      const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+      const isAndroidChrome = /Android/.test(navigator.userAgent) && /Chrome/.test(navigator.userAgent);
+
+      function showBanner(mode) {
+        const banner = document.createElement('div');
+        banner.id = 'pwa-banner';
+        banner.style.cssText = `
+          position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+          background:#1a1f35; border:1.5px solid rgba(200,164,74,.5);
+          border-radius:16px; padding:14px 18px; z-index:99999;
+          display:flex; align-items:center; gap:12px;
+          box-shadow:0 4px 24px rgba(0,0,0,.6); max-width:340px; width:90%;
+          font-family:Georgia,serif; animation: pwa-slide-up .3s ease;
+        `;
+        const style = document.createElement('style');
+        style.textContent = `@keyframes pwa-slide-up { from { opacity:0; transform:translateX(-50%) translateY(20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }`;
+        document.head.appendChild(style);
+
+        const icon = document.createElement('span');
+        icon.textContent = '📲';
+        icon.style.fontSize = '1.8rem';
+
+        const text = document.createElement('div');
+        text.style.cssText = 'flex:1; color:#e0d0a0; font-size:.85rem; line-height:1.4';
+
+        const close = document.createElement('button');
+        close.textContent = '✕';
+        close.style.cssText = 'background:none; border:none; color:#888; font-size:1rem; cursor:pointer; padding:4px; flex-shrink:0;';
+        close.onclick = () => {
+          banner.remove();
+          try { localStorage.setItem('pwa_dismissed', '1'); } catch(e) {}
+        };
+
+        if (mode === 'ios') {
+          text.innerHTML = `<strong style="color:#f0c040">${t('pwa_install_title')||'Installa l\'app'}</strong><br>${t('pwa_install_ios')||'Tocca <strong>⎋ Condividi</strong> poi <strong>Aggiungi a schermata Home</strong>'}`;
+        } else if (mode === 'android') {
+          text.innerHTML = `<strong style="color:#f0c040">${t('pwa_install_title')||'Installa l\'app'}</strong><br>${t('pwa_install_android')||'Per una migliore esperienza, installa SuperCatan sul tuo dispositivo'}`;
+
+          const installBtn = document.createElement('button');
+          installBtn.textContent = t('pwa_install_btn') || '📲 Installa';
+          installBtn.style.cssText = `
+            display:block; width:100%; margin-top:10px; padding:8px;
+            background:rgba(200,164,74,.2); border:1.5px solid rgba(200,164,74,.5);
+            border-radius:10px; color:#f0c040; font-size:.9rem;
+            font-family:Georgia,serif; cursor:pointer;
+          `;
+          installBtn.onclick = () => {
+            if (window._pwaPrompt) {
+              window._pwaPrompt.prompt();
+              window._pwaPrompt.userChoice.then(() => { banner.remove(); });
+            }
+          };
+          text.appendChild(installBtn);
+        }
+
+        banner.appendChild(icon);
+        banner.appendChild(text);
+        banner.appendChild(close);
+        document.body.appendChild(banner);
+      }
+
+      if (isIOS) {
+        // Show iOS instructions after 2s
+        setTimeout(() => showBanner('ios'), 2000);
+      } else if (isAndroidChrome) {
+        // Wait for beforeinstallprompt
+        window.addEventListener('beforeinstallprompt', (e) => {
+          e.preventDefault();
+          window._pwaPrompt = e;
+          setTimeout(() => showBanner('android'), 2000);
+        });
+      }
+    })();
+  </script>
+</body>
+</html>
