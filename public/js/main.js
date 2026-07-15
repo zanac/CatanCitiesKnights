@@ -31,6 +31,7 @@ let desertCenter = true;  // default: desert at center
 let zeroResources = true;  // default: no starting resources
 let hiddenResources = true; // default: hide other players' resource counts
 let balancedResources = false; // default: pure random tile placement
+let citiesKnights = false; // default: base game, no Cities & Knights variant
 let randomPorts   = false; // default: standard port layout
 let randomNumbers = false; // default: standard spiral number placement
 let quickGame     = false; // default: win at 10 points; quick=win at 7
@@ -439,6 +440,12 @@ function initSetupScreen(skipRoom) {
     if (balancedResources) showRuleToast('rule_desc_balanced_res');
   });
 
+  document.getElementById('btn-cities-knights')?.addEventListener('click', () => {
+    citiesKnights = !citiesKnights;
+    document.getElementById('btn-cities-knights').classList.toggle('active', citiesKnights);
+    if (citiesKnights) showRuleToast('rule_desc_cities_knights');
+  });
+
   // Debug mode: show dev card selector if ?debug=1 in URL
   if (_urlParams.get('debug') === '1') {
     document.getElementById('debug-dev-section')?.style && (document.getElementById('debug-dev-section').style.display='block');
@@ -642,7 +649,7 @@ function startGame() {
   requestAnimationFrame(() => {
     canvas.width  = window.innerWidth;
     canvas.height = window.innerHeight;
-    send({ type: 'START_GAME', players, desertCenter, zeroResources, randomPorts, randomNumbers, quickGame, unlimitedDev, instantDev, hiddenResources, balancedResources, skinId: selectedSkinId, debugDevCard, debugResources, debugForceDice });
+    send({ type: 'START_GAME', players, desertCenter, zeroResources, randomPorts, randomNumbers, quickGame, unlimitedDev, instantDev, hiddenResources, balancedResources, citiesKnights, skinId: selectedSkinId, debugDevCard, debugResources, debugForceDice });
   });
 }
 
@@ -682,7 +689,7 @@ window.startPhoneHost = function() {
   showScreen('phone-host-screen');
   document.getElementById('ph-pin-value').textContent = currentPin;
   history.replaceState({}, '', `?pin=${currentPin}`);
-  send({ type: 'START_GAME', players, desertCenter, zeroResources, randomPorts, randomNumbers, quickGame, unlimitedDev, instantDev, hiddenResources,
+  send({ type: 'START_GAME', players, desertCenter, zeroResources, randomPorts, randomNumbers, quickGame, unlimitedDev, instantDev, hiddenResources, citiesKnights,
          skinId: selectedSkinId, debugDevCard, debugResources, debugForceDice });
 };
 

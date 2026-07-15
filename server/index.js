@@ -354,6 +354,7 @@ function handle(msg, ws) {
         instantDev:        !!msg.instantDev,
         hiddenResources:   !!msg.hiddenResources,
         balancedResources: !!msg.balancedResources,
+        citiesKnights:     !!msg.citiesKnights,
       });
       room.undoStack = [];
       broadcastState(pin);

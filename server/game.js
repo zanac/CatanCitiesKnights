@@ -62,6 +62,8 @@ class CatanGame {
     this.debugForceDice = options.debugForceDice || null;
     this.hiddenResources = !!options.hiddenResources;   // default OFF: clients hide other players' counts
     this.balancedResources = !!options.balancedResources; // default OFF: no-cluster tile placement
+    this.citiesKnights = !!options.citiesKnights;        // default OFF: Cities & Knights variant
+    this.winPoints = this.citiesKnights && !options.quickGame ? 13 : this.winPoints;
 
     // ── Player state ─────────────────────────────────────────────
     this.players = playerConfigs.map((p, i) => ({
@@ -77,7 +79,14 @@ class CatanGame {
       points: 0,
       hasLongestRoad: false,
       hasLargestArmy: false,
-      knightsPlayed: 0
+      knightsPlayed: 0,
+      // ── Cities & Knights (unused unless this.citiesKnights) ──────
+      commodities: { paper: 0, cloth: 0, coin: 0 },
+      cityImprovements: { trade: 0, politics: 0, science: 0 }, // 0..5 per track
+      knights: [],        // { vertexId, rank: 'basic'|'strong'|'mighty', active }
+      progressCards: [],  // { type, subtype }
+      cityWalls: [],      // vertexId list
+      defenderPoints: 0   // Defender of Catan cards held
     }));
 
     // ── Board and deck ───────────────────────────────────────────
@@ -120,6 +129,10 @@ class CatanGame {
     this.pendingRoadBuilding = 0;      // free roads still to place (0, 1, or 2)
     this.pendingMonopoly = false;
     this.currentTradeOffer = null;
+
+    // ── Cities & Knights globals (unused unless this.citiesKnights) ─
+    this.barbarianProgress = 0; // 0..7, resets after each attack
+    this.metropolises = { trade: null, politics: null, science: null }; // playerId or null
   }
 
   // ================================================================
@@ -1197,7 +1210,10 @@ class CatanGame {
       debugResources: this.debugResources || false,
       debugForceDice: this.debugForceDice || null,
       hiddenResources: this.hiddenResources || false,
-      balancedResources: this.balancedResources || false
+      balancedResources: this.balancedResources || false,
+      citiesKnights: this.citiesKnights || false,
+      barbarianProgress: this.barbarianProgress || 0,
+      metropolises: this.metropolises || { trade: null, politics: null, science: null }
     };
   }
 
@@ -1237,6 +1253,9 @@ class CatanGame {
       pendingSetupEndTurn:this.pendingSetupEndTurn,
       hiddenResources:    this.hiddenResources,
       balancedResources:  this.balancedResources,
+      citiesKnights:      this.citiesKnights,
+      barbarianProgress:  this.barbarianProgress,
+      metropolises:       this.metropolises,
     }));
   }
 
@@ -1269,6 +1288,9 @@ class CatanGame {
     this.devCardBoughtThisTurn = s.devCardBoughtThisTurn || false;
     this.hiddenResources     = !!s.hiddenResources;
     this.balancedResources   = !!s.balancedResources;
+    this.citiesKnights       = !!s.citiesKnights;
+    this.barbarianProgress   = s.barbarianProgress || 0;
+    this.metropolises        = s.metropolises || { trade: null, politics: null, science: null };
     this.pendingSteal        = s.pendingSteal;
     this.robberCandidates    = s.robberCandidates;
     this.pendingRoadBuilding = s.pendingRoadBuilding;
