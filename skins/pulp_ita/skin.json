@@ -1,0 +1,149 @@
+{
+  "id": "pulp_ita",
+  "name": "Pulp Fiction",
+  "version": "1.0",
+  "preview": "preview.png",
+  "provides": [
+    "hex",
+    "robber",
+    "buildings",
+    "roads"
+  ],
+  "hex": {
+    "wood": "hex/wood.png",
+    "brick": "hex/brick.png",
+    "sheep": "hex/sheep.png",
+    "wheat": "hex/wheat.png",
+    "ore": "hex/ore.png",
+    "desert": "hex/desert.png"
+  },
+  "robber": "robber.png",
+  "buildings": {
+    "settlement": {
+      "red": "buildings/settlement_red.png",
+      "blue": "buildings/settlement_blue.png",
+      "green": "buildings/settlement_green.png",
+      "yellow": "buildings/settlement_yellow.png"
+    },
+    "city": {
+      "red": "buildings/city_red.png",
+      "blue": "buildings/city_blue.png",
+      "green": "buildings/city_green.png",
+      "yellow": "buildings/city_yellow.png"
+    }
+  },
+  "roads": {
+    "red": "roads/road_red.png",
+    "blue": "roads/road_blue.png",
+    "green": "roads/road_green.png",
+    "yellow": "roads/road_yellow.png"
+  },
+  "resource_names": {
+    "ore": "Soldi",
+    "brick": "Armi",
+    "wheat": "Prostitute",
+    "wood": "Corruzione",
+    "sheep": "Droga"
+  },
+  "resource_emojis": {
+    "ore": "💰",
+    "brick": "💣",
+    "wheat": "💋",
+    "wood": "👮‍♂️",
+    "sheep": "💉"
+  },
+  "labels": {
+    "road": "Via di Fuga",
+    "settlement": "Piazza di Spaccio",
+    "city": "Covo Criminale",
+    "port": "Ricettatore",
+    "robber": "Marsellus Wallace",
+    "knight": "Sicario",
+    "monopoly": "Agli ordini di Mia",
+    "year_of_plenty": "Rapina",
+    "road_building": "Signor Wolf",
+    "longest_road": "Via di Fuga più Lunga",
+    "largest_army": "Controllo del Quartiere",
+    "devcard_knight_desc": "Sposta Marsellus Wallace e ruba una risorsa da un giocatore adiacente",
+    "devcard_road_desc": "Costruisci 2 Vie di Fuga gratuitamente",
+    "devcard_mono_desc": "Soddisfa i desideri di Mia. Scegli una risorsa: tutti gli altri giocatori ti consegnano ogni loro carta di quel tipo.",
+    "devcard_yop_desc": "Prendi 2 risorse qualsiasi dalla banca",
+    "log_place_sett": "piazza una Piazza di Spaccio",
+    "log_place_road": "piazza una Via di Fuga",
+    "log_build_road": "costruisce una Via di Fuga",
+    "log_build_sett": "costruisce una Piazza di Spaccio",
+    "log_build_city": "costruisce un Covo Criminale",
+    "log_longest_road": "ha la Via di Fuga più Lunga",
+    "log_largest_army": "controlla il Quartiere",
+    "banner_robber": "🕴 Muovi Marsellus Wallace! Tocca un esagono.",
+    "mob_robber_instruction": "🕴 Tocca il tabellone per muovere Marsellus Wallace",
+    "phase_place_sett": "Piazza una Piazza di Spaccio",
+    "phase_place_road": "Piazza una Via di Fuga",
+    "phase_robber": "Muovi Marsellus Wallace",
+    "setup_place_road_hint": "Tocca il tabellone per piazzare una Via di Fuga",
+    "setup_place_sett_hint": "Tocca il tabellone per piazzare una Piazza di Spaccio",
+    "mob_build_label_road": "Tocca un lato per la Via di Fuga",
+    "mob_build_label_settlement": "Tocca un vertice per la Piazza di Spaccio",
+    "mob_build_label_city": "Tocca una Piazza di Spaccio per upgradare a Covo Criminale",
+    "mob_build_label_robber": "Tocca un esagono per muovere Marsellus Wallace",
+    "mob_steal_instruction": "🕴 Ruba una risorsa",
+    "devname_knight": "💣 Sicario",
+    "devname_monopoly": "💰 Mia Wallace",
+    "devname_yop": "💎 Rapina",
+    "devname_road_build": "🧹 Signor Wolf",
+    "devname_vp": "⭐ Punto Vittoria",
+    "yop_title": "💎 Rapina",
+    "monopoly_title": "💰 Mia Wallace",
+    "longest_road_emoji": "🚗",
+    "largest_army_emoji": "💣"
+  },
+  "vp_cards": {
+    "chapel": {
+      "name": "🕰️ L'Orologio d'Oro",
+      "emoji": "🕰️",
+      "desc": "Appartenuto a Butch prima di lui, e a suo padre in Vietnam — ⭐ +1 Punto Vittoria",
+      "image": "vp/chapel.jpg"
+    },
+    "library": {
+      "name": "💼 La Valigetta",
+      "emoji": "💼",
+      "desc": "Nessuno sa cosa c'è dentro. Tutti la vogliono. — ⭐ +1 Punto Vittoria",
+      "image": "vp/library.jpg"
+    },
+    "market": {
+      "name": "🏍️ La Moto \"Grace\" di Zed",
+      "emoji": "🏍️",
+      "desc": "Zed è morto, baby. Zed è morto. — ⭐ +1 Punto Vittoria",
+      "image": "vp/market.jpg"
+    },
+    "university": {
+      "name": "🏆 Trofeo del Twist",
+      "emoji": "🏆",
+      "desc": "Vince chi balla meglio. Jack Rabbit Slim's, ore 21. — ⭐ +1 Punto Vittoria",
+      "image": "vp/university.jpg"
+    },
+    "palace": {
+      "name": "👛 Portafoglio \"Bad Mother Fucker\"",
+      "emoji": "👛",
+      "desc": "\"Il cammino dell'uomo retto è ostacolato da ogni parte dalle iniquità degli esseri egoisti e dalla tirannia degli uomini malvagi...\" — ⭐ +1 Punto Vittoria",
+      "image": "vp/palace.jpg"
+    }
+  },
+  "dev_cards": {
+    "knight": {
+      "image": "dev/knight.jpg"
+    },
+    "monopoly": {
+      "image": "dev/monopoly.jpg"
+    },
+    "yearOfPlenty": {
+      "image": "dev/year_of_plenty.jpg",
+      "desc": "E se per caso qualcuno di voi coglioni si azzarda a muoversi, io vi faccio secchi, brutti figli di puttana! Tutti, fino all'ultimo! Prendi 2 risorse qualsiasi dalla banca."
+    },
+    "roadBuilding": {
+      "image": "dev/road_building.jpg",
+      "desc": "Sono il signor Wolf. Risolvo problemi. Costruisci 2 Vie di Fuga gratuitamente."
+    }
+  },
+  "lang": "it"
+}

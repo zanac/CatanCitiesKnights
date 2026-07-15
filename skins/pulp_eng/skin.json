@@ -1,0 +1,149 @@
+{
+  "id": "pulp_eng",
+  "name": "Pulp Fiction",
+  "version": "1.0",
+  "preview": "preview.png",
+  "provides": [
+    "hex",
+    "robber",
+    "buildings",
+    "roads"
+  ],
+  "hex": {
+    "wood": "hex/wood.png",
+    "brick": "hex/brick.png",
+    "sheep": "hex/sheep.png",
+    "wheat": "hex/wheat.png",
+    "ore": "hex/ore.png",
+    "desert": "hex/desert.png"
+  },
+  "robber": "robber.png",
+  "buildings": {
+    "settlement": {
+      "red": "buildings/settlement_red.png",
+      "blue": "buildings/settlement_blue.png",
+      "green": "buildings/settlement_green.png",
+      "yellow": "buildings/settlement_yellow.png"
+    },
+    "city": {
+      "red": "buildings/city_red.png",
+      "blue": "buildings/city_blue.png",
+      "green": "buildings/city_green.png",
+      "yellow": "buildings/city_yellow.png"
+    }
+  },
+  "roads": {
+    "red": "roads/road_red.png",
+    "blue": "roads/road_blue.png",
+    "green": "roads/road_green.png",
+    "yellow": "roads/road_yellow.png"
+  },
+  "resource_names": {
+    "ore": "Money",
+    "brick": "Arms",
+    "wheat": "Escorts",
+    "wood": "Corruption",
+    "sheep": "Drugs"
+  },
+  "resource_emojis": {
+    "ore": "💰",
+    "brick": "💣",
+    "wheat": "💋",
+    "wood": "👮‍♂️",
+    "sheep": "💉"
+  },
+  "labels": {
+    "road": "Escape Route",
+    "settlement": "Drug-Dealing Spot",
+    "city": "Crime Den",
+    "port": "Fence",
+    "robber": "Marsellus Wallace",
+    "knight": "Hitman",
+    "monopoly": "Mia Wallace",
+    "year_of_plenty": "Heist",
+    "road_building": "Mr. Wolf",
+    "longest_road": "Longest Escape Route",
+    "largest_army": "Neighborhood Control",
+    "devcard_knight_desc": "Move Marsellus Wallace and steal a resource from an adjacent player",
+    "devcard_road_desc": "Build 2 Escape Routes for free",
+    "devcard_mono_desc": "Satisfy Mia's desires. Choose a resource: all other players hand over every card of that type.",
+    "devcard_yop_desc": "Take any 2 resources from the bank",
+    "log_place_sett": "places a Drug-Dealing Spot",
+    "log_place_road": "places an Escape Route",
+    "log_build_road": "builds an Escape Route",
+    "log_build_sett": "builds a Drug-Dealing Spot",
+    "log_build_city": "builds a Crime Den",
+    "log_longest_road": "has the Longest Escape Route",
+    "log_largest_army": "controls the Neighborhood",
+    "banner_robber": "🕴 Move Marsellus Wallace! Tap a hex.",
+    "mob_robber_instruction": "🕴 Tap the board to move Marsellus Wallace",
+    "phase_place_sett": "Place a Drug-Dealing Spot",
+    "phase_place_road": "Place an Escape Route",
+    "phase_robber": "Move Marsellus Wallace",
+    "setup_place_road_hint": "Tap the board to place an Escape Route",
+    "setup_place_sett_hint": "Tap the board to place a Drug-Dealing Spot",
+    "mob_build_label_road": "Tap an edge for the Escape Route",
+    "mob_build_label_settlement": "Tap a vertex for the Drug-Dealing Spot",
+    "mob_build_label_city": "Tap a Drug-Dealing Spot to upgrade to Crime Den",
+    "mob_build_label_robber": "Tap a hex to move Marsellus Wallace",
+    "mob_steal_instruction": "🕴 Steal a resource",
+    "devname_knight": "💣 Hitman",
+    "devname_monopoly": "💰 Mia Wallace",
+    "devname_yop": "💎 Heist",
+    "devname_road_build": "🧹 Mr. Wolf",
+    "devname_vp": "⭐ Victory Point",
+    "yop_title": "💎 Heist",
+    "monopoly_title": "💰 Mia Wallace",
+    "longest_road_emoji": "🚗",
+    "largest_army_emoji": "💣"
+  },
+  "vp_cards": {
+    "chapel": {
+      "name": "🕰️ The Gold Watch",
+      "emoji": "🕰️",
+      "desc": "\"It was your father's watch. He hid it in the one place he knew he could hide something.\" — ⭐ +1 Victory Point",
+      "image": "vp/chapel.jpg"
+    },
+    "library": {
+      "name": "💼 The Briefcase",
+      "emoji": "💼",
+      "desc": "Nobody knows what's inside. Everyone wants it. — ⭐ +1 Victory Point",
+      "image": "vp/library.jpg"
+    },
+    "market": {
+      "name": "🏍️ Zed's Chopper \"Grace\"",
+      "emoji": "🏍️",
+      "desc": "\"Zed's dead, baby. Zed's dead.\" — ⭐ +1 Victory Point",
+      "image": "vp/market.jpg"
+    },
+    "university": {
+      "name": "🏆 Jack Rabbit Slim's Twist Trophy",
+      "emoji": "🏆",
+      "desc": "\"You can dance, you can jive, having the time of your life.\" — ⭐ +1 Victory Point",
+      "image": "vp/university.jpg"
+    },
+    "palace": {
+      "name": "👛 Bad Mother F***er Wallet",
+      "emoji": "👛",
+      "desc": "\"The path of the righteous man is beset on all sides by the inequities of the selfish and the tyranny of evil men...\" — ⭐ +1 Victory Point",
+      "image": "vp/palace.jpg"
+    }
+  },
+  "dev_cards": {
+    "knight": {
+      "image": "dev/knight.jpg"
+    },
+    "monopoly": {
+      "image": "dev/monopoly.jpg"
+    },
+    "yearOfPlenty": {
+      "image": "dev/year_of_plenty.jpg",
+      "desc": "\"Any of you fucking pricks move, and I'll execute every motherfucking last one of you! Take any 2 resources from the bank.\""
+    },
+    "roadBuilding": {
+      "image": "dev/road_building.jpg",
+      "desc": "\"I'm Winston Wolfe. I solve problems. Build 2 Escape Routes for free.\""
+    }
+  },
+  "lang": "en"
+}

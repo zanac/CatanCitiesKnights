@@ -1,0 +1,98 @@
+{
+  "id": "classic",
+  "name": "Classic Catan",
+  "version": "1.0",
+  "preview": "preview.png",
+  "provides": [
+    "hex",
+    "robber",
+    "buildings",
+    "roads"
+  ],
+  "hex": {
+    "wood": "hex/wood.png",
+    "brick": "hex/brick.png",
+    "sheep": "hex/sheep.png",
+    "wheat": "hex/wheat.png",
+    "ore": "hex/ore.png",
+    "desert": "hex/desert.png"
+  },
+  "robber": "robber.png",
+  "buildings": {
+    "settlement": {
+      "red": "buildings/settlement_red.png",
+      "blue": "buildings/settlement_blue.png",
+      "green": "buildings/settlement_green.png",
+      "yellow": "buildings/settlement_yellow.png"
+    },
+    "city": {
+      "red": "buildings/city_red.png",
+      "blue": "buildings/city_blue.png",
+      "green": "buildings/city_green.png",
+      "yellow": "buildings/city_yellow.png"
+    }
+  },
+  "roads": {
+    "red": "roads/road_red.png",
+    "blue": "roads/road_blue.png",
+    "green": "roads/road_green.png",
+    "yellow": "roads/road_yellow.png"
+  },
+  "resource_names": {
+    "wood": "",
+    "brick": "",
+    "sheep": "",
+    "wheat": "",
+    "ore": ""
+  },
+  "vp_cards": {
+    "chapel": {
+      "name": "⛪ Chapel",
+      "emoji": "⛪",
+      "desc": "A place of worship. +1 Victory Point.",
+      "image": "vp/chapel.jpg"
+    },
+    "library": {
+      "name": "📚 Library",
+      "emoji": "📚",
+      "desc": "Knowledge is power. +1 Victory Point.",
+      "image": "vp/library.jpg"
+    },
+    "market": {
+      "name": "🏪 Market",
+      "emoji": "🏪",
+      "desc": "Trade flourishes under your domain. +1 Victory Point.",
+      "image": "vp/market.jpg"
+    },
+    "university": {
+      "name": "🎓 University",
+      "emoji": "🎓",
+      "desc": "Scholars illuminate the path to victory. +1 Victory Point.",
+      "image": "vp/university.jpg"
+    },
+    "palace": {
+      "name": "🏰 Great Hall",
+      "emoji": "🏰",
+      "desc": "The seat of your power and glory. +1 Victory Point.",
+      "image": "vp/palace.jpg"
+    }
+  },
+  "dev_cards": {
+    "knight": {
+      "image": "dev/knight.jpg",
+      "desc": "Move the robber and steal 1 resource card from an adjacent player."
+    },
+    "monopoly": {
+      "image": "dev/monopoly.jpg",
+      "desc": "Name 1 resource. All other players must give you all of their resource cards of that type."
+    },
+    "yearOfPlenty": {
+      "image": "dev/yearOfPlenty.jpg",
+      "desc": "Take any 2 resource cards from the bank. They can be of the same type or different."
+    },
+    "roadBuilding": {
+      "image": "dev/roadBuilding.jpg",
+      "desc": "Build 2 roads for free."
+    }
+  }
+}
