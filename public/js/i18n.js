@@ -71,6 +71,9 @@ const TRANSLATIONS = {
     ck_missing:        'mancanti',
     ck_buy:            'Compra',
     ck_need_city:      'Serve una città in più',
+    commodity_paper:   'Carta',
+    commodity_cloth:   'Tessuto',
+    commodity_coin:    'Moneta',
 
     // Banners
     banner_robber:    '🦹 Muovi il bandito! Tocca un esagono.',
@@ -335,6 +338,9 @@ const TRANSLATIONS = {
     ck_missing:        'missing',
     ck_buy:            'Buy',
     ck_need_city:      'Need one more city',
+    commodity_paper:   'Paper',
+    commodity_cloth:   'Cloth',
+    commodity_coin:    'Coin',
 
     banner_robber:    '🦹 Move the robber! Tap a hex.',
     tap_continue:     'Tap to continue ▶',
@@ -593,6 +599,9 @@ const TRANSLATIONS = {
     ck_missing:        'manquant(s)',
     ck_buy:            'Acheter',
     ck_need_city:      'Il faut une ville de plus',
+    commodity_paper:   'Papier',
+    commodity_cloth:   'Tissu',
+    commodity_coin:    'Pièce',
 
     banner_robber:    '🦹 Déplacez le voleur ! Touchez un hexagone.',
     tap_continue:     'Toucher pour continuer ▶',
@@ -851,6 +860,9 @@ const TRANSLATIONS = {
     ck_missing:        'fehlen',
     ck_buy:            'Kaufen',
     ck_need_city:      'Eine Stadt mehr nötig',
+    commodity_paper:   'Papier',
+    commodity_cloth:   'Tuch',
+    commodity_coin:    'Münze',
 
     banner_robber:    '🦹 Räuber versetzen! Tippe auf ein Feld.',
     tap_continue:     'Tippen um fortzufahren ▶',
@@ -1081,6 +1093,13 @@ function resName(res) {
   const skinOverride = SKIN?.resourceNames?.[res];
   if (skinOverride) return skinOverride;
   return (t('res') || {})[res] || res;
+}
+
+// Cities & Knights: skin-aware commodity name (paper/cloth/coin), mirrors resName()
+function commodityName(commodity) {
+  const skinOverride = SKIN?.commodityNames?.[commodity];
+  if (skinOverride) return skinOverride;
+  return t(`commodity_${commodity}`) || commodity;
 }
 
 // Returns the emoji for a resource, checking skin override first
