@@ -78,6 +78,52 @@ function showRuleToast(descKey) {
   el._t = setTimeout(() => el.remove(), 5000);
 }
 
+// ===================================================================
+//  MODERN HOVER TOOLTIPS
+//  Any element with data-tip="text" gets a styled floating tooltip on
+//  hover instead of the plain browser one. A single delegated listener
+//  on document means this keeps working even though player cards,
+//  build buttons, etc. get their innerHTML fully replaced on every
+//  render — there's nothing per-element to re-attach.
+// ===================================================================
+(function initHoverTooltips() {
+  const tip = document.createElement('div');
+  tip.id = 'hover-tooltip';
+  document.body.appendChild(tip);
+
+  function position(el) {
+    const r = el.getBoundingClientRect();
+    const tw = tip.offsetWidth, th = tip.offsetHeight;
+    let x = r.left + r.width / 2 - tw / 2;
+    let y = r.top - th - 10;
+    let below = false;
+    if (y < 4) { y = r.bottom + 10; below = true; }
+    x = Math.max(6, Math.min(x, window.innerWidth - tw - 6));
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+    tip.classList.toggle('below', below);
+  }
+  function show(el) {
+    const text = el.getAttribute('data-tip');
+    if (!text) return;
+    tip.textContent = text;
+    tip.classList.add('visible');
+    position(el);
+  }
+  function hide() { tip.classList.remove('visible'); }
+
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest('[data-tip]');
+    if (el) show(el);
+  });
+  document.addEventListener('mouseout', e => {
+    const el = e.target.closest('[data-tip]');
+    if (el && (!e.relatedTarget || !el.contains(e.relatedTarget))) hide();
+  });
+  document.addEventListener('scroll', hide, true);
+  window.addEventListener('blur', hide);
+})();
+
 function applyTranslations() {
   document.querySelectorAll('[data-t]').forEach(el => {
     const key = el.getAttribute('data-t');
@@ -90,11 +136,14 @@ function applyTranslations() {
     const override = SKIN?.labels?.[key];
     if (override) el.textContent = override;
   });
-  // Update resource cost badges with skin-aware emojis
+  // Update resource cost badges with skin-aware emojis + hover tooltip with the name
   document.querySelectorAll('[data-res-cost]').forEach(el => {
     const res = el.getAttribute('data-res-cost').split(',');
     const sep = el.getAttribute('data-res-cost').includes('wood,brick') && res.length === 2 ? '+' : '';
     el.textContent = sep ? res.map(r => resEmoji(r)).join('+') : res.map(r => resEmoji(r)).join('');
+    const counts = {};
+    res.forEach(r => counts[r] = (counts[r]||0)+1);
+    el.setAttribute('data-tip', Object.entries(counts).map(([r,n]) => n>1 ? `${resName(r)}×${n}` : resName(r)).join(', '));
   });
 }
 
@@ -139,16 +188,16 @@ const DEV_NAMES = new Proxy({}, { get: (_,k) => DEV_NAMES_MAP()[k] });
 // Medal badge: 🥇 symbol for longest road / largest army
 function badgeHTML(p) {
   const badges = [];
-  if (p.hasLongestRoad)  badges.push(`<span class="medal-badge road-medal"  title="${skinLabel('longest_road','Longest Road')}">${skinLabel('longest_road_emoji','🛤')}🥇</span>`);
-  if (p.hasLargestArmy)  badges.push(`<span class="medal-badge army-medal"  title="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇</span>`);
+  if (p.hasLongestRoad)  badges.push(`<span class="medal-badge road-medal"  data-tip="${skinLabel('longest_road','Longest Road')}">${skinLabel('longest_road_emoji','🛤')}🥇</span>`);
+  if (p.hasLargestArmy)  badges.push(`<span class="medal-badge army-medal"  data-tip="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇</span>`);
   const kn = p.knightsPlayed || 0;
   if (kn > 0 && !p.hasLargestArmy) badges.push(`<span class="knight-count">⚔️×${kn}</span>`);
-  else if (kn > 0 && p.hasLargestArmy) badges[badges.length-1] = `<span class="medal-badge army-medal" title="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇<sup>${kn}</sup></span>`;
+  else if (kn > 0 && p.hasLargestArmy) badges[badges.length-1] = `<span class="medal-badge army-medal" data-tip="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇<sup>${kn}</sup></span>`;
   if (state?.citiesKnights && state.metropolises) {
     for (const tr of ['trade','politics','science']) {
       if (state.metropolises[tr] === p.id) {
         const name = t(`ck_track_${tr}`) || tr;
-        badges.push(`<span class="medal-badge ck-metro-medal" title="${t('ck_metropolis')||'Metropoli'}: ${name}">🏛️</span>`);
+        badges.push(`<span class="medal-badge ck-metro-medal" data-tip="${t('ck_metropolis')||'Metropoli'}: ${name}">🏛️</span>`);
       }
     }
   }
@@ -1334,14 +1383,14 @@ function renderPlayers() {
     const res = p.resources;
     const hide = shouldHideRes(p);
     const resHtml = ['wood','brick','sheep','wheat','ore'].map(r=>
-      `<div class="res-badge${hide?' res-hidden':''}"><span class="res-icon">${resEmoji(r)}</span><span>${hide ? '?' : (res[r]||0)}</span></div>`
+      `<div class="res-badge${hide?' res-hidden':''}" data-tip="${resName(r)}"><span class="res-icon">${resEmoji(r)}</span><span>${hide ? '?' : (res[r]||0)}</span></div>`
     ).join('');
     const devCount = p.devCards?.length||0;
     const specials = badgeHTML(p);
     const ckHtml = state.citiesKnights ? `<div class="player-commodities">
-        <div class="res-badge"><span class="res-icon">📜</span><span>${hide?'?':(p.commodities?.paper||0)}</span></div>
-        <div class="res-badge"><span class="res-icon">🧵</span><span>${hide?'?':(p.commodities?.cloth||0)}</span></div>
-        <div class="res-badge"><span class="res-icon">🪙</span><span>${hide?'?':(p.commodities?.coin||0)}</span></div>
+        <div class="res-badge" data-tip="${commodityName('paper')}"><span class="res-icon">📜</span><span>${hide?'?':(p.commodities?.paper||0)}</span></div>
+        <div class="res-badge" data-tip="${commodityName('cloth')}"><span class="res-icon">🧵</span><span>${hide?'?':(p.commodities?.cloth||0)}</span></div>
+        <div class="res-badge" data-tip="${commodityName('coin')}"><span class="res-icon">🪙</span><span>${hide?'?':(p.commodities?.coin||0)}</span></div>
       </div>` : '';
     const mobConn = state.mobileConnected?.[p.id];
     const qrBtn   = `<button class="card-qr-btn" title="QR"
@@ -2027,11 +2076,11 @@ function openCityImprovementsModal() {
       <div class="ck-track-row">
         <div class="ck-track-header">
           <span class="ck-track-name">${tr.icon} ${trackName}</span>
-          ${holdsMetro ? `<span class="ck-metro-badge" title="${t('ck_metropolis')||'Metropoli'}">🏛️</span>` : ''}
+          ${holdsMetro ? `<span class="ck-metro-badge" data-tip="${t('ck_metropolis')||'Metropoli'}">🏛️</span>` : ''}
         </div>
         <div class="ck-track-dots">${dots}</div>
         <div class="ck-track-footer">
-          <span class="ck-track-commodity">${CK_COMMODITY_ICON[tr.commodity]} ${have}</span>
+          <span class="ck-track-commodity" data-tip="${commodityName(tr.commodity)}">${CK_COMMODITY_ICON[tr.commodity]} ${have}</span>
           <button class="dev-card-btn${disabled?'':' playable'}" ${disabled?'disabled':''}
             onclick="buyCityImprovement('${tr.id}')">
             ${maxed ? (t('ck_maxed')||'MAX') : `${t('ck_buy')||'Compra'} ${CK_COMMODITY_ICON[tr.commodity]}${cost}`}
@@ -2798,7 +2847,7 @@ function renderPlayersWithGains(gameState, gains) {
       const gainBadge = gained > 0
         ? `<span class="res-gain-delta">+${gained}</span>`
         : '';
-      return `<div class="res-badge${cls}${hide?' res-hidden':''}">
+      return `<div class="res-badge${cls}${hide?' res-hidden':''}" data-tip="${resName(r)}">
         <span class="res-icon">${resEmoji(r)}</span>
         <span>${hide ? (gained > 0 ? '' : '?') : total}</span>
         ${gainBadge}
@@ -3020,7 +3069,7 @@ function renderPlayersWithTradeDeltas(deltas) {
       const d = playerDeltas[r];
       const cls = d > 0 ? ' trade-gained' : d < 0 ? ' trade-lost' : '';
       const badge = d ? `<span class="res-delta ${d>0?'delta-pos':'delta-neg'}">${d>0?'+':''}${d}</span>` : '';
-      return `<div class="res-badge${cls}${hide?' res-hidden':''}"><span class="res-icon">${resEmoji(r)}</span><span>${hide ? (d ? '' : '?') : (res[r]||0)}</span>${badge}</div>`;
+      return `<div class="res-badge${cls}${hide?' res-hidden':''}" data-tip="${resName(r)}"><span class="res-icon">${resEmoji(r)}</span><span>${hide ? (d ? '' : '?') : (res[r]||0)}</span>${badge}</div>`;
     }).join('');
 
     const devCount = p.devCards?.length||0;
@@ -3193,10 +3242,10 @@ function drawTVResIcon(ctx, resource, x, y, size) {
 // ===================================================================
 
 async function loadSkinAssets(skinId) {
-  if (skinId === 'standard') { SKIN = { id:'standard', hexImages:{}, robberImage:null, buildingImages:{}, roadImages:{}, resourceNames:{}, resourceEmojis:{}, labels:{}, vpCards:{}, vpImages:{}, devCards:{}, devImages:{} }; if (state) { renderBoard(); render(); } return; }
+  if (skinId === 'standard') { SKIN = { id:'standard', hexImages:{}, robberImage:null, buildingImages:{}, roadImages:{}, resourceNames:{}, resourceEmojis:{}, commodityNames:{}, labels:{}, vpCards:{}, vpImages:{}, devCards:{}, devImages:{} }; if (state) { renderBoard(); render(); } return; }
   try {
     const res = await fetch(`/skins/${skinId}/skin.json`);
-    if (!res.ok) { SKIN = { id:'standard', hexImages:{}, robberImage:null, buildingImages:{}, roadImages:{}, resourceNames:{}, resourceEmojis:{}, labels:{}, vpCards:{}, vpImages:{}, devCards:{}, devImages:{} }; return; }
+    if (!res.ok) { SKIN = { id:'standard', hexImages:{}, robberImage:null, buildingImages:{}, roadImages:{}, resourceNames:{}, resourceEmojis:{}, commodityNames:{}, labels:{}, vpCards:{}, vpImages:{}, devCards:{}, devImages:{} }; return; }
     const meta = await res.json();
     const hexImages = {};
     if (meta.provides?.includes('hex') && meta.hex) {
@@ -3261,6 +3310,13 @@ async function loadSkinAssets(skinId) {
         if (emoji) resourceEmojis[res] = emoji; // only override if non-empty
       }
     }
+    // Cities & Knights: load commodity name overrides from skin (optional, none define it yet)
+    const commodityNames = {};
+    if (meta.commodity_names) {
+      for (const [com, name] of Object.entries(meta.commodity_names)) {
+        if (name) commodityNames[com] = name;
+      }
+    }
     // Load generic label overrides from skin (optional)
     const labels = meta.labels || {};
     const vpCards = meta.vp_cards || {};
@@ -3290,13 +3346,13 @@ async function loadSkinAssets(skinId) {
       });
     }));
 
-    SKIN = { id: skinId, hexImages, robberImage, buildingImages, roadImages, resourceNames, resourceEmojis, labels, vpCards, vpImages, devCards, devImages };
+    SKIN = { id: skinId, hexImages, robberImage, buildingImages, roadImages, resourceNames, resourceEmojis, commodityNames, labels, vpCards, vpImages, devCards, devImages };
     if (state && !window.__SPECTATOR_MODE) { renderBoard(); render(); } // re-render board + all labels/banners
     if (!window.__SPECTATOR_MODE) applyTranslations(); // re-apply skin label overrides to static DOM
     console.log(`Skin "${skinId}" loaded: ${Object.keys(hexImages).length} hex + ${Object.keys(roadImages).length} road textures`);
   } catch(e) {
     console.warn('Skin load failed:', e);
-    SKIN = { id:'standard', hexImages:{}, robberImage:null, buildingImages:{}, roadImages:{}, resourceNames:{}, resourceEmojis:{}, labels:{}, vpCards:{}, vpImages:{}, devCards:{}, devImages:{} };
+    SKIN = { id:'standard', hexImages:{}, robberImage:null, buildingImages:{}, roadImages:{}, resourceNames:{}, resourceEmojis:{}, commodityNames:{}, labels:{}, vpCards:{}, vpImages:{}, devCards:{}, devImages:{} };
   }
 }
 

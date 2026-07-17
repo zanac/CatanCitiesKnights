@@ -1624,3 +1624,40 @@ body.ui-xlarge .medal-badge, body.ui-xlarge .knight-count { font-size: 1.3rem; p
 .ck-track-commodity { font-size: .85rem; color: #c8b080; }
 .ck-track-footer .dev-card-btn { padding: 6px 12px; font-size: .82rem; }
 .ck-reason { font-size: .72rem; color: #999; }
+
+/* ================================================================
+   MODERN HOVER TOOLTIPS (replaces native title= for icon labels)
+   Elements carry data-tip="text"; #hover-tooltip is a single
+   floating element positioned by JS, so it survives re-renders.
+   ================================================================ */
+#hover-tooltip {
+  position: fixed;
+  z-index: 10000;
+  background: rgba(18,16,30,.97);
+  border: 1.5px solid #c8a84b;
+  color: #f0e6c8;
+  padding: 5px 11px;
+  border-radius: 8px;
+  font-size: .8rem;
+  font-family: 'Georgia', serif;
+  pointer-events: none;
+  white-space: nowrap;
+  box-shadow: 0 6px 18px rgba(0,0,0,.55);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+#hover-tooltip.visible { opacity: 1; transform: translateY(0); }
+#hover-tooltip::after {
+  content: '';
+  position: absolute;
+  left: 50%; margin-left: -5px;
+  border: 5px solid transparent;
+  border-top-color: #c8a84b;
+  bottom: -10px;
+}
+#hover-tooltip.below::after {
+  bottom: auto; top: -10px;
+  border-top-color: transparent;
+  border-bottom-color: #c8a84b;
+}
