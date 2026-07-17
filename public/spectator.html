@@ -176,25 +176,40 @@
       const total = (gameState.diceValues?.[0]||0) + (gameState.diceValues?.[1]||0);
       if (!total) return;
 
-      // Calculate gains
+      // Calculate gains (mirrors server _distributeResources, including
+      // the Cities & Knights commodity split when that variant is on)
+      const HEX_COMMODITY = { wood: 'paper', sheep: 'cloth', ore: 'coin' };
+      const ck = !!gameState.citiesKnights;
       const gains = {};
+      const commodityGains = {};
       for (const hex of gameState.board.hexes) {
         if (hex.number !== total || hex.id === gameState.robberHexId) continue;
         for (const vid of hex.vertices) {
           const v = gameState.board.vertices[vid];
           if (v.owner === null) continue;
-          const amt = v.building === 'city' ? 2 : 1;
-          if (!gains[v.owner]) gains[v.owner] = {};
-          gains[v.owner][hex.resource] = (gains[v.owner][hex.resource]||0) + amt;
+          const isCity = v.building === 'city';
+          if (ck && isCity && HEX_COMMODITY[hex.resource]) {
+            if (!gains[v.owner]) gains[v.owner] = {};
+            gains[v.owner][hex.resource] = (gains[v.owner][hex.resource]||0) + 1;
+            const commodity = HEX_COMMODITY[hex.resource];
+            if (!commodityGains[v.owner]) commodityGains[v.owner] = {};
+            commodityGains[v.owner][commodity] = (commodityGains[v.owner][commodity]||0) + 1;
+          } else {
+            const amt = isCity ? 2 : 1;
+            if (!gains[v.owner]) gains[v.owner] = {};
+            gains[v.owner][hex.resource] = (gains[v.owner][hex.resource]||0) + amt;
+          }
         }
       }
-      if (!Object.keys(gains).length) return;
+      if (!Object.keys(gains).length && !Object.keys(commodityGains).length) return;
 
       // Build toast HTML
-      const lines = Object.entries(gains).map(([pid, g]) => {
+      const CK_COMMODITY_ICON = { paper: '📜', cloth: '🧵', coin: '🪙' };
+      const lines = Object.entries({...gains, ...commodityGains}).map(([pid]) => {
         const p = gameState.players[pid];
-        const res = Object.entries(g).map(([r,n]) => `${n}×${resEmoji(r)}`).join(' ');
-        return `<span style="color:${p.color};font-weight:bold">${p.name}</span>: ${res}`;
+        const res = Object.entries(gains[pid]||{}).map(([r,n]) => `${n}×${resEmoji(r)}`).join(' ');
+        const com = Object.entries(commodityGains[pid]||{}).map(([c,n]) => `${n}×${CK_COMMODITY_ICON[c]}`).join(' ');
+        return `<span style="color:${p.color};font-weight:bold">${p.name}</span>: ${[res,com].filter(Boolean).join(' ')}`;
       });
 
       // Remove existing toast

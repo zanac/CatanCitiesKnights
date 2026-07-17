@@ -385,6 +385,8 @@ function handle(msg, ws) {
       if (room?.game) { pushUndo(room); room.game.buildRoad(msg.edgeId); broadcastState(pin); } break;
     case 'BUY_DEV_CARD':
       if (room?.game) { pushUndo(room); room.game.buyDevCard(); broadcastState(pin); } break;
+    case 'BUY_CITY_IMPROVEMENT':
+      if (room?.game) { pushUndo(room); room.game.buyCityImprovement(msg.track); broadcastState(pin); } break;
     case 'PLAY_DEV_CARD':
       if (room?.game) { pushUndo(room); room.game.playDevCard(msg.cardType, msg.params); broadcastState(pin); } break;
     case 'TRADE_BANK':

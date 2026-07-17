@@ -1592,3 +1592,35 @@ body.ui-xlarge .medal-badge, body.ui-xlarge .knight-count { font-size: 1.3rem; p
 #phone-host-btn {
   margin-top: 10px;
 }
+
+/* ================================================================
+   CITIES & KNIGHTS — basic (skin-independent) styling.
+   Deliberately plain: no skin manifest hooks yet, just readable
+   emoji + CSS so the mechanics can be tested before art exists.
+   ================================================================ */
+.ck-only.hidden { display: none; }
+
+.player-commodities { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+.ck-metro-medal {
+  background: rgba(200,164,74,.2);
+  border: 1.5px solid rgba(240,192,64,.6);
+  color: #f0c040;
+}
+
+.ck-track-row {
+  border: 1.5px solid rgba(200,164,74,.3);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.ck-track-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.ck-track-name { font-weight: bold; color: #f0e6c8; }
+.ck-metro-badge { font-size: 1.1rem; }
+.ck-track-dots { display: flex; gap: 5px; margin-bottom: 8px; }
+.ck-dot { width: 12px; height: 12px; border-radius: 50%; background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25); display: inline-block; }
+.ck-dot.filled { background: #f0c040; border-color: #f0c040; }
+.ck-track-footer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ck-track-commodity { font-size: .85rem; color: #c8b080; }
+.ck-track-footer .dev-card-btn { padding: 6px 12px; font-size: .82rem; }
+.ck-reason { font-size: .72rem; color: #999; }

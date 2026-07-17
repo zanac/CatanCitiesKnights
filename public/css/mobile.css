@@ -380,6 +380,11 @@ html, body {
   color: #c0c0e0;
   font-size: .75rem;
 }
+.mob-medal.ck-metro-medal {
+  background: rgba(200,164,74,.2);
+  border: 1.5px solid rgba(240,192,64,.5);
+  color: #f0c040;
+}
 
 /* ── Sheet collapse during board placement ── */
 #mob-board-wrap {

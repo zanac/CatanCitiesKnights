@@ -31,6 +31,13 @@ const COSTS = {
   devCard:    { sheep: 1, wheat: 1, ore: 1 }
 };
 
+// Cities & Knights: which commodity a city produces from each resource hex
+// (wheat/brick hexes yield no commodity, only the base resource)
+const HEX_COMMODITY = { wood: 'paper', sheep: 'cloth', ore: 'coin' };
+
+// Cities & Knights: which commodity funds each city-improvement track
+const TRACK_COMMODITY = { trade: 'cloth', politics: 'coin', science: 'paper' };
+
 // Standard Catan dev card deck composition
 const DEV_CARD_COUNTS = {
   knight: 14, victoryPoint: 5, roadBuilding: 2, yearOfPlenty: 2, monopoly: 2
@@ -660,8 +667,17 @@ class CatanGame {
           const vertex = this.board.vertices[vid];
           if (vertex.owner !== null) {
             const player = this.players[vertex.owner];
-            const amount = vertex.building === 'city' ? 2 : 1;
-            player.resources[hex.resource] = (player.resources[hex.resource] || 0) + amount;
+            const isCity = vertex.building === 'city';
+            if (this.citiesKnights && isCity && HEX_COMMODITY[hex.resource]) {
+              // C&K: a city on a commodity hex gives 1 base resource + 1 commodity
+              // (wheat/brick hexes still give the old 2x base resource, no commodity exists for them)
+              player.resources[hex.resource] = (player.resources[hex.resource] || 0) + 1;
+              const commodity = HEX_COMMODITY[hex.resource];
+              player.commodities[commodity] = (player.commodities[commodity] || 0) + 1;
+            } else {
+              const amount = isCity ? 2 : 1;
+              player.resources[hex.resource] = (player.resources[hex.resource] || 0) + amount;
+            }
           }
         }
       }
@@ -828,6 +844,49 @@ class CatanGame {
     // It is cleared at the start of the next action (rollDice / endTurn)
     this.lastDrawnCard = { playerId: player.id, card, subtype: cardSubtype };
     return { ok: true, card };
+  }
+
+  // ── Cities & Knights: buy the next level of a city-improvement track ──
+  // Cost = nextLevel commodities of the track's color; level is capped at
+  // the player's city count; the metropolis on a track is founded by the
+  // first player to reach level 4, and seized by anyone who later reaches
+  // a strictly higher level than the current holder (i.e. level 5).
+  buyCityImprovement(track) {
+    if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (!this.diceRolled) return { error: 'Roll dice first' };
+    if (!TRACK_COMMODITY[track]) return { error: 'Invalid improvement track' };
+
+    const player = this.currentPlayer;
+    const currentLevel = player.cityImprovements[track];
+    if (currentLevel >= 5) return { error: 'Track already at maximum level' };
+
+    const nextLevel = currentLevel + 1;
+    if (nextLevel > player.cities.length) return { error: 'Not enough cities for this level' };
+
+    const commodity = TRACK_COMMODITY[track];
+    const cost = nextLevel;
+    if ((player.commodities[commodity] || 0) < cost) return { error: `Not enough ${commodity}` };
+
+    player.commodities[commodity] -= cost;
+    player.cityImprovements[track] = nextLevel;
+    this._log('log_city_improvement', { name: player.name, track, level: nextLevel });
+
+    if (nextLevel >= 4) {
+      const holder = this.metropolises[track];
+      const holderLevel = holder !== null ? this.players[holder].cityImprovements[track] : 0;
+      if (holder !== player.id && nextLevel > holderLevel) {
+        if (holder !== null) {
+          this.players[holder].points -= 2;
+          this._log('log_metropolis_lost', { name: this.players[holder].name, track });
+        }
+        this.metropolises[track] = player.id;
+        player.points += 2;
+        this._log('log_metropolis_founded', { name: player.name, track });
+      }
+    }
+
+    this._checkWin(player);
+    return { ok: true, track, level: nextLevel };
   }
 
   playDevCard(cardType, params = {}) {

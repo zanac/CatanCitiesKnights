@@ -144,6 +144,14 @@ function badgeHTML(p) {
   const kn = p.knightsPlayed || 0;
   if (kn > 0 && !p.hasLargestArmy) badges.push(`<span class="knight-count">⚔️×${kn}</span>`);
   else if (kn > 0 && p.hasLargestArmy) badges[badges.length-1] = `<span class="medal-badge army-medal" title="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇<sup>${kn}</sup></span>`;
+  if (state?.citiesKnights && state.metropolises) {
+    for (const tr of ['trade','politics','science']) {
+      if (state.metropolises[tr] === p.id) {
+        const name = t(`ck_track_${tr}`) || tr;
+        badges.push(`<span class="medal-badge ck-metro-medal" title="${t('ck_metropolis')||'Metropoli'}: ${name}">🏛️</span>`);
+      }
+    }
+  }
   return badges.join('');
 }
 
@@ -1330,6 +1338,11 @@ function renderPlayers() {
     ).join('');
     const devCount = p.devCards?.length||0;
     const specials = badgeHTML(p);
+    const ckHtml = state.citiesKnights ? `<div class="player-commodities">
+        <div class="res-badge"><span class="res-icon">📜</span><span>${hide?'?':(p.commodities?.paper||0)}</span></div>
+        <div class="res-badge"><span class="res-icon">🧵</span><span>${hide?'?':(p.commodities?.cloth||0)}</span></div>
+        <div class="res-badge"><span class="res-icon">🪙</span><span>${hide?'?':(p.commodities?.coin||0)}</span></div>
+      </div>` : '';
     const mobConn = state.mobileConnected?.[p.id];
     const qrBtn   = `<button class="card-qr-btn" title="QR"
       onclick="event.stopPropagation();showQRForPlayer(${p.id})">📱</button>`;
@@ -1345,6 +1358,7 @@ function renderPlayers() {
         ${qrBtn}
       </div>
       <div class="player-resources">${resHtml}</div>
+      ${ckHtml}
       ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}
       ${specials?`<div class="player-specials">${specials}</div>`:''}`;
     panel.appendChild(card);
@@ -1593,6 +1607,18 @@ function updateButtonStates() {
     const isSetup = state.phase==='setup1'||state.phase==='setup2';
     btnUndo.disabled = !(isMain || isSetup) || (isMain && (!rolled || pending || discard)) || !state.undoAvailable;
   }
+
+  // ── Cities & Knights: city improvements ──
+  const ckOn = !!state.citiesKnights;
+  document.querySelectorAll('.ck-only').forEach(el => el.classList.toggle('hidden', !ckOn));
+  if (ckOn) {
+    const btnCk = document.getElementById('btn-city-improvements');
+    const commodities = p?.commodities || {};
+    const hasAnyCommodity = (commodities.paper||0)>0 || (commodities.cloth||0)>0 || (commodities.coin||0)>0;
+    const hasCity = (p?.cities?.length||0) > 0;
+    btnCk.disabled = !canAct;
+    btnCk.classList.toggle('cant-afford', canAct && !(hasCity && hasAnyCommodity));
+  }
 }
 
 function checkModals() {
@@ -1807,6 +1833,7 @@ document.getElementById('btn-devcard')?.addEventListener('click',    ()=>send({t
 document.getElementById('btn-trade-bank')?.addEventListener('click', openTradeBankModal);
 document.getElementById('btn-trade-player')?.addEventListener('click',openPlayerTradeModal);
 document.getElementById('btn-play-dev')?.addEventListener('click',   openDevCardModal);
+document.getElementById('btn-city-improvements')?.addEventListener('click', openCityImprovementsModal);
 
 // ===================================================================
 //  TRADE BANK MODAL
@@ -1966,6 +1993,66 @@ function openDevCardModal() {
   openModal('modal-dev-play');
 }
 window.playCard=type=>{ closeAllModals(); if(type==='yearOfPlenty') openYOPModal(); else if(type==='monopoly') openMonopolyModal(); else send({type:'PLAY_DEV_CARD',cardType:type,params:{}}); };
+
+// ===================================================================
+//  CITIES & KNIGHTS — CITY IMPROVEMENTS MODAL
+// ===================================================================
+const CK_TRACKS = [
+  { id: 'trade',    commodity: 'cloth', icon: '⚖️', color: '#d4a843' },
+  { id: 'politics', commodity: 'coin',  icon: '👑', color: '#5a7fd4' },
+  { id: 'science',  commodity: 'paper', icon: '🔬', color: '#5ac47a' }
+];
+const CK_COMMODITY_ICON = { cloth: '🧵', coin: '🪙', paper: '📜' };
+
+function openCityImprovementsModal() {
+  const p = state.players[state.currentPlayerIndex];
+  const list = document.getElementById('city-improvements-list');
+  list.innerHTML = CK_TRACKS.map(tr => {
+    const level = p.cityImprovements?.[tr.id] || 0;
+    const have  = p.commodities?.[tr.commodity] || 0;
+    const maxed = level >= 5;
+    const nextLevel = level + 1;
+    const cost = nextLevel;
+    const overCityCap = nextLevel > (p.cities?.length || 0);
+    const cantAfford = have < cost;
+    const disabled = maxed || overCityCap || cantAfford;
+    const holdsMetro = state.metropolises?.[tr.id] === p.id;
+    const dots = Array.from({length:5}, (_,i)=>`<span class="ck-dot${i<level?' filled':''}"></span>`).join('');
+    const trackName = skinLabel(`ck_track_${tr.id}`, t(`ck_track_${tr.id}`) || tr.id);
+    let reason = '';
+    if (maxed) reason = t('ck_maxed') || 'MAX';
+    else if (overCityCap) reason = t('ck_need_city') || 'Serve una città in più';
+    else if (cantAfford) reason = `${CK_COMMODITY_ICON[tr.commodity]} ${cost-have} ${t('ck_missing')||'mancanti'}`;
+    return `
+      <div class="ck-track-row">
+        <div class="ck-track-header">
+          <span class="ck-track-name">${tr.icon} ${trackName}</span>
+          ${holdsMetro ? `<span class="ck-metro-badge" title="${t('ck_metropolis')||'Metropoli'}">🏛️</span>` : ''}
+        </div>
+        <div class="ck-track-dots">${dots}</div>
+        <div class="ck-track-footer">
+          <span class="ck-track-commodity">${CK_COMMODITY_ICON[tr.commodity]} ${have}</span>
+          <button class="dev-card-btn${disabled?'':' playable'}" ${disabled?'disabled':''}
+            onclick="buyCityImprovement('${tr.id}')">
+            ${maxed ? (t('ck_maxed')||'MAX') : `${t('ck_buy')||'Compra'} ${CK_COMMODITY_ICON[tr.commodity]}${cost}`}
+          </button>
+          ${(!maxed && disabled) ? `<span class="ck-reason">${reason}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+  openModal('modal-city-improvements');
+}
+window.buyCityImprovement = track => {
+  send({ type: 'BUY_CITY_IMPROVEMENT', track });
+  // Keep the modal open and refresh it so the player can buy the next
+  // level right away without reopening (server broadcast lands async,
+  // so we optimistically re-render from current local state on the next tick).
+  setTimeout(() => {
+    if (document.getElementById('modal-city-improvements').classList.contains('open')) {
+      openCityImprovementsModal();
+    }
+  }, 150);
+};
 
 // Year of Plenty
 let yopChoices=[];

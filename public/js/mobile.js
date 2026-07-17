@@ -821,6 +821,8 @@ function renderWaitScreen(curIdx) {
     p.hasLongestRoad ? `<span class="mob-medal road-medal" title="${skinLabel('longest_road','Longest Road')}">${skinLabel('longest_road_emoji','🛤')}🥇</span>` : '',
     p.hasLargestArmy ? `<span class="mob-medal army-medal" title="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇</span>` : '',
     (p.knightsPlayed||0)>0 && !p.hasLargestArmy ? `<span class="mob-medal knight-count">⚔️×${p.knightsPlayed}</span>` : '',
+    state.citiesKnights && ['trade','politics','science'].some(tr=>state.metropolises?.[tr]===p.id)
+      ? `<span class="mob-medal ck-metro-medal">🏛️</span>` : '',
   ].join('');
   if (pMedalHTML) {
     if (!pMedals) {
@@ -839,8 +841,13 @@ function renderWaitScreen(curIdx) {
 
   // Resources (mine)
   if (me) {
+    const ckPills = state.citiesKnights ? [
+      `<div class="mob-res-pill"><span>📜</span><span class="n">${me.commodities?.paper||0}</span></div>`,
+      `<div class="mob-res-pill"><span>🧵</span><span class="n">${me.commodities?.cloth||0}</span></div>`,
+      `<div class="mob-res-pill"><span>🪙</span><span class="n">${me.commodities?.coin||0}</span></div>`,
+    ].join('') : '';
     document.getElementById('mob-resources').innerHTML =
-      RES_LIST.map(r=>`<div class="mob-res-pill"><span>${resEmoji(r)}</span><span class="n">${me.resources[r]||0}</span></div>`).join('');
+      RES_LIST.map(r=>`<div class="mob-res-pill"><span>${resEmoji(r)}</span><span class="n">${me.resources[r]||0}</span></div>`).join('') + ckPills;
   }
 
   // Board
