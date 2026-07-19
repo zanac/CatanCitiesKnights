@@ -387,6 +387,20 @@ function handle(msg, ws) {
       if (room?.game) { pushUndo(room); room.game.buyDevCard(); broadcastState(pin); } break;
     case 'BUY_CITY_IMPROVEMENT':
       if (room?.game) { pushUndo(room); room.game.buyCityImprovement(msg.track); broadcastState(pin); } break;
+    case 'BUILD_KNIGHT':
+      if (room?.game) { pushUndo(room); room.game.buildKnight(msg.vertexId); broadcastState(pin); } break;
+    case 'ACTIVATE_KNIGHT':
+      if (room?.game) { pushUndo(room); room.game.activateKnight(msg.vertexId); broadcastState(pin); } break;
+    case 'PROMOTE_KNIGHT':
+      if (room?.game) { pushUndo(room); room.game.promoteKnight(msg.vertexId); broadcastState(pin); } break;
+    case 'MOVE_KNIGHT':
+      if (room?.game) { pushUndo(room); room.game.moveKnight(msg.fromVertexId, msg.toVertexId); broadcastState(pin); } break;
+    case 'CHASE_ROBBER_KNIGHT':
+      if (room?.game) { pushUndo(room); room.game.chaseRobberWithKnight(msg.vertexId, msg.newHexId); broadcastState(pin); } break;
+    case 'DISPLACE_KNIGHT':
+      if (room?.game) { pushUndo(room); room.game.displaceKnight(msg.fromVertexId, msg.targetVertexId); broadcastState(pin); } break;
+    case 'RESOLVE_KNIGHT_DISPLACE':
+      if (room?.game) { pushUndo(room); room.game.resolveKnightDisplace(msg.vertexId); broadcastState(pin); } break;
     case 'PLAY_DEV_CARD':
       if (room?.game) { pushUndo(room); room.game.playDevCard(msg.cardType, msg.params); broadcastState(pin); } break;
     case 'TRADE_BANK':

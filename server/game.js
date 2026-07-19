@@ -38,6 +38,14 @@ const HEX_COMMODITY = { wood: 'paper', sheep: 'cloth', ore: 'coin' };
 // Cities & Knights: which commodity funds each city-improvement track
 const TRACK_COMMODITY = { trade: 'cloth', politics: 'coin', science: 'paper' };
 
+// Cities & Knights: knights — build and promote cost the same; each player
+// has a limited physical supply of 2 knights per rank (6 total)
+const KNIGHT_COST = { sheep: 1, ore: 1 };
+const KNIGHT_ACTIVATE_COST = { wheat: 1 };
+const KNIGHT_RANKS = ['basic', 'strong', 'mighty'];
+const KNIGHT_RANK_LIMIT = 2;
+const MIGHTY_REQUIRES_POLITICS_LEVEL = 3; // the "Fortress" improvement
+
 // Standard Catan dev card deck composition
 const DEV_CARD_COUNTS = {
   knight: 14, victoryPoint: 5, roadBuilding: 2, yearOfPlenty: 2, monopoly: 2
@@ -140,6 +148,7 @@ class CatanGame {
     // ── Cities & Knights globals (unused unless this.citiesKnights) ─
     this.barbarianProgress = 0; // 0..7, resets after each attack
     this.metropolises = { trade: null, politics: null, science: null }; // playerId or null
+    this.pendingKnightDisplace = null; // { targetVertexId, playerId, options } while player picks the retreat spot
   }
 
   // ================================================================
@@ -889,6 +898,224 @@ class CatanGame {
     return { ok: true, track, level: nextLevel };
   }
 
+  // Cities & Knights: is there already a knight (any player) on this vertex?
+  _knightAt(vertexId) {
+    for (const p of this.players) {
+      const knight = p.knights.find(k => k.vertexId === vertexId);
+      if (knight) return { knight, playerId: p.id };
+    }
+    return null;
+  }
+
+  // ── Cities & Knights: build a basic knight on an empty intersection
+  // connected to your own road network (no distance rule, unlike settlements) ──
+  buildKnight(vertexId) {
+    if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (!this.diceRolled) return { error: 'Roll dice first' };
+    const player = this.currentPlayer;
+    const vertex = this.board.vertices[vertexId];
+    if (!vertex) return { error: 'Invalid vertex' };
+    if (vertex.owner !== null) return { error: 'Vertex is occupied by a settlement or city' };
+    if (this._knightAt(vertexId)) return { error: 'Vertex already has a knight' };
+
+    const connectedRoad = vertex.adjEdges.some(eid => this.board.edges[eid].owner === player.id);
+    if (!connectedRoad) return { error: 'Must be connected to your own road network' };
+
+    const basicCount = player.knights.filter(k => k.rank === 'basic').length;
+    if (basicCount >= KNIGHT_RANK_LIMIT) return { error: 'No more basic knights available' };
+
+    if (!this._canAfford(player, KNIGHT_COST)) return { error: 'Not enough resources' };
+    this._spend(player, KNIGHT_COST);
+    player.knights.push({ vertexId, rank: 'basic', active: false, usedActionThisTurn: false });
+    this._log('log_build_knight', { name: player.name });
+    return { ok: true };
+  }
+
+  // ── Cities & Knights: pay 1 wheat to flip an inactive knight to active ──
+  activateKnight(vertexId) {
+    if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (!this.diceRolled) return { error: 'Roll dice first' };
+    const player = this.currentPlayer;
+    const knight = player.knights.find(k => k.vertexId === vertexId);
+    if (!knight) return { error: 'No knight of yours on that vertex' };
+    if (knight.active) return { error: 'Knight is already active' };
+
+    if (!this._canAfford(player, KNIGHT_ACTIVATE_COST)) return { error: 'Not enough wheat' };
+    this._spend(player, KNIGHT_ACTIVATE_COST);
+    knight.active = true;
+    this._log('log_activate_knight', { name: player.name });
+    return { ok: true };
+  }
+
+  // ── Cities & Knights: promote a knight one rank (basic→strong→mighty).
+  // Mighty requires the Politics track at level 3 ("Fortress"). Promotion
+  // keeps the knight's position and active/inactive state unchanged. ──
+  promoteKnight(vertexId) {
+    if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (!this.diceRolled) return { error: 'Roll dice first' };
+    const player = this.currentPlayer;
+    const knight = player.knights.find(k => k.vertexId === vertexId);
+    if (!knight) return { error: 'No knight of yours on that vertex' };
+
+    const idx = KNIGHT_RANKS.indexOf(knight.rank);
+    if (idx === KNIGHT_RANKS.length - 1) return { error: 'Knight is already at maximum rank' };
+    const nextRank = KNIGHT_RANKS[idx + 1];
+
+    if (nextRank === 'mighty' && (player.cityImprovements.politics || 0) < MIGHTY_REQUIRES_POLITICS_LEVEL) {
+      return { error: 'Requires Politics improvement level 3' };
+    }
+
+    const rankCount = player.knights.filter(k => k.rank === nextRank).length;
+    if (rankCount >= KNIGHT_RANK_LIMIT) return { error: `No more ${nextRank} knights available` };
+
+    if (!this._canAfford(player, KNIGHT_COST)) return { error: 'Not enough resources' };
+    this._spend(player, KNIGHT_COST);
+    knight.rank = nextRank;
+    this._log('log_promote_knight', { name: player.name, rank: nextRank });
+    return { ok: true };
+  }
+
+  // Cities & Knights: relative combat strength, used to compare knights
+  static KNIGHT_STRENGTH = { basic: 1, strong: 2, mighty: 3 };
+
+  // ── Cities & Knights: move an active knight one step to an adjacent,
+  // empty intersection connected by one of your own roads ──
+  moveKnight(fromVertexId, toVertexId) {
+    if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (!this.diceRolled) return { error: 'Roll dice first' };
+    const player = this.currentPlayer;
+    const knight = player.knights.find(k => k.vertexId === fromVertexId);
+    if (!knight) return { error: 'No knight of yours on that vertex' };
+    if (!knight.active) return { error: 'Knight must be active to move' };
+    if (knight.usedActionThisTurn) return { error: 'This knight already acted this turn' };
+
+    const toVertex = this.board.vertices[toVertexId];
+    if (!toVertex) return { error: 'Invalid destination' };
+    if (toVertex.owner !== null) return { error: 'Destination is occupied by a settlement or city' };
+    if (this._knightAt(toVertexId)) return { error: 'Destination already has a knight' };
+
+    const fromVertex = this.board.vertices[fromVertexId];
+    const connected = fromVertex.adjEdges.some(eid => {
+      const e = this.board.edges[eid];
+      return (e.v1 === toVertexId || e.v2 === toVertexId) && e.owner === player.id;
+    });
+    if (!connected) return { error: 'Destination is not connected by one of your roads' };
+
+    knight.vertexId = toVertexId;
+    knight.usedActionThisTurn = true;
+    this._log('log_move_knight', { name: player.name });
+    return { ok: true };
+  }
+
+  // ── Cities & Knights: use an active knight adjacent to the robber to
+  // chase it to a new hex and steal, exactly like the base-game Knight
+  // dev card. Deactivates the knight. ──
+  chaseRobberWithKnight(vertexId, newHexId) {
+    if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (!this.diceRolled) return { error: 'Roll dice first' };
+    const player = this.currentPlayer;
+    const knight = player.knights.find(k => k.vertexId === vertexId);
+    if (!knight) return { error: 'No knight of yours on that vertex' };
+    if (!knight.active) return { error: 'Knight must be active' };
+    if (knight.usedActionThisTurn) return { error: 'This knight already acted this turn' };
+
+    const vertex = this.board.vertices[vertexId];
+    if (!vertex.adjHexes.includes(this.robberHexId)) return { error: 'Knight is not adjacent to the robber' };
+    if (newHexId === this.robberHexId) return { error: 'Must move robber to a different hex' };
+
+    const oldHex = this.board.hexes[this.robberHexId];
+    oldHex.hasRobber = false;
+    this.robberHexId = newHexId;
+    const newHex = this.board.hexes[newHexId];
+    newHex.hasRobber = true;
+
+    knight.active = false; // chasing the robber deactivates the knight
+    knight.usedActionThisTurn = true;
+    this._log('log_knight_chase_robber', { name: player.name });
+
+    const candidates = new Set();
+    for (const vid of newHex.vertices) {
+      const v2 = this.board.vertices[vid];
+      if (v2.owner !== null && v2.owner !== player.id) candidates.add(v2.owner);
+    }
+    this.robberCandidates = [...candidates];
+    if (this.robberCandidates.length === 1) {
+      return this.stealResource(this.robberCandidates[0]);
+    } else if (this.robberCandidates.length > 1) {
+      this.pendingSteal = true;
+    }
+    return { ok: true, candidates: this.robberCandidates };
+  }
+
+  // ── Cities & Knights: use an active, stronger knight to displace a
+  // weaker enemy knight on an adjacent (road-connected) intersection.
+  // The displaced knight retreats to an empty intersection connected by
+  // ITS OWNER's roads; if none exists, it's removed from the board. ──
+  displaceKnight(fromVertexId, targetVertexId) {
+    if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (!this.diceRolled) return { error: 'Roll dice first' };
+    const player = this.currentPlayer;
+    const knight = player.knights.find(k => k.vertexId === fromVertexId);
+    if (!knight) return { error: 'No knight of yours on that vertex' };
+    if (!knight.active) return { error: 'Knight must be active' };
+    if (knight.usedActionThisTurn) return { error: 'This knight already acted this turn' };
+
+    const targetInfo = this._knightAt(targetVertexId);
+    if (!targetInfo || targetInfo.playerId === player.id) return { error: 'No enemy knight there' };
+    const targetKnight = targetInfo.knight;
+
+    const KS = CatanGame.KNIGHT_STRENGTH;
+    if (KS[knight.rank] <= KS[targetKnight.rank]) {
+      return { error: 'Your knight must be stronger than the enemy knight' };
+    }
+
+    const fromVertex = this.board.vertices[fromVertexId];
+    const connected = fromVertex.adjEdges.some(eid => {
+      const e = this.board.edges[eid];
+      return (e.v1 === targetVertexId || e.v2 === targetVertexId) && e.owner !== null;
+    });
+    if (!connected) return { error: 'Not connected to the enemy knight by a road' };
+
+    knight.usedActionThisTurn = true;
+    this._log('log_displace_knight', { name: player.name, target: this.players[targetInfo.playerId].name });
+
+    // Where can the displaced knight retreat to? An empty intersection
+    // adjacent to its own spot, connected by one of ITS OWNER's roads.
+    const targetVertex = this.board.vertices[targetVertexId];
+    const options = [];
+    for (const eid of targetVertex.adjEdges) {
+      const e = this.board.edges[eid];
+      if (e.owner !== targetInfo.playerId) continue;
+      const neighborId = e.v1 === targetVertexId ? e.v2 : e.v1;
+      const neighbor = this.board.vertices[neighborId];
+      if (neighbor.owner === null && !this._knightAt(neighborId)) options.push(neighborId);
+    }
+
+    if (options.length === 0) {
+      const list = this.players[targetInfo.playerId].knights;
+      list.splice(list.indexOf(targetKnight), 1);
+      return { ok: true, removed: true };
+    } else if (options.length === 1) {
+      targetKnight.vertexId = options[0];
+      return { ok: true, movedTo: options[0] };
+    } else {
+      this.pendingKnightDisplace = { targetVertexId, playerId: targetInfo.playerId, options };
+      return { ok: true, candidates: options };
+    }
+  }
+
+  // Cities & Knights: pick the retreat spot when displaceKnight() left
+  // more than one valid option for the displaced player's knight.
+  resolveKnightDisplace(newVertexId) {
+    if (!this.pendingKnightDisplace) return { error: 'No displacement pending' };
+    const { playerId, targetVertexId, options } = this.pendingKnightDisplace;
+    if (!options.includes(newVertexId)) return { error: 'Invalid destination' };
+    const targetKnight = this.players[playerId].knights.find(k => k.vertexId === targetVertexId);
+    if (targetKnight) targetKnight.vertexId = newVertexId;
+    this.pendingKnightDisplace = null;
+    return { ok: true };
+  }
+
   playDevCard(cardType, params = {}) {
     // Knight is the only card playable before rolling dice
     if (!this.diceRolled && cardType !== 'knight') return { error: 'Roll dice first (except knight)' };
@@ -1005,6 +1232,7 @@ class CatanGame {
     if (this.pendingRobber || this.pendingSteal) return { error: 'Resolve robber first' };
     if (this.pendingTrade) return { error: 'Resolve pending trade first' };
     if (this.pendingDiscard.length > 0) return { error: 'Players must discard first' };
+    if (this.pendingKnightDisplace) return { error: 'Resolve knight displacement first' };
 
     // Mark all cards bought this turn as playable next turn
     for (const card of this.currentPlayer.devCards) {
@@ -1019,6 +1247,11 @@ class CatanGame {
     this.pendingMonopoly = false;
 
     this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.players.length;
+    // Cities & Knights: each knight may act once per turn; reset for the player
+    // whose turn is starting now
+    if (this.citiesKnights) {
+      this.currentPlayer.knights.forEach(k => { k.usedActionThisTurn = false; });
+    }
     this._log('log_turn', {name: this.currentPlayer.name});
     return { ok: true };
   }
@@ -1272,7 +1505,8 @@ class CatanGame {
       balancedResources: this.balancedResources || false,
       citiesKnights: this.citiesKnights || false,
       barbarianProgress: this.barbarianProgress || 0,
-      metropolises: this.metropolises || { trade: null, politics: null, science: null }
+      metropolises: this.metropolises || { trade: null, politics: null, science: null },
+      pendingKnightDisplace: this.pendingKnightDisplace || null
     };
   }
 
@@ -1315,6 +1549,7 @@ class CatanGame {
       citiesKnights:      this.citiesKnights,
       barbarianProgress:  this.barbarianProgress,
       metropolises:       this.metropolises,
+      pendingKnightDisplace: this.pendingKnightDisplace,
     }));
   }
 
@@ -1350,6 +1585,7 @@ class CatanGame {
     this.citiesKnights       = !!s.citiesKnights;
     this.barbarianProgress   = s.barbarianProgress || 0;
     this.metropolises        = s.metropolises || { trade: null, politics: null, science: null };
+    this.pendingKnightDisplace = s.pendingKnightDisplace || null;
     this.pendingSteal        = s.pendingSteal;
     this.robberCandidates    = s.robberCandidates;
     this.pendingRoadBuilding = s.pendingRoadBuilding;

@@ -203,6 +203,7 @@
         <button id="btn-play-dev" class="build-btn" data-t="btn_play_dev">🃏 Play Dev Card</button>
         <div id="sec-city-improvements-title" class="drawer-section-title ck-only hidden" style="margin-top:14px" data-t="sec_city_improvements">CITTÀ &amp; CAVALIERI</div>
         <button id="btn-city-improvements" class="build-btn ck-only hidden"><span data-t="btn_city_improvements" data-skin-label="city_improvements">🏛 Miglioramenti Città</span></button>
+        <button id="btn-knight" class="build-btn ck-only hidden"><span data-t="btn_build_knight" data-skin-label="build_knight">🛡 Costruisci Cavaliere</span> <small data-res-cost="sheep,ore">🐑🪨</small></button>
       </div>
     </div>
 
@@ -285,6 +286,16 @@
     <div class="modal-content">
       <h2 data-t="city_improvements_title">🏛 Miglioramenti Città</h2>
       <div id="city-improvements-list"></div>
+      <div class="modal-actions">
+        <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-knight-actions" class="modal">
+    <div class="modal-content">
+      <h2 data-t="knight_actions_title">🛡 Cavaliere</h2>
+      <div id="knight-actions-list"></div>
       <div class="modal-actions">
         <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
       </div>

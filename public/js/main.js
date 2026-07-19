@@ -209,7 +209,8 @@ function badgeHTML(p) {
 // ===================================================================
 let ws;
 let state    = null;
-let buildMode = null; // 'road'|'settlement'|'city'|null
+let buildMode = null; // 'road'|'settlement'|'city'|'knight'|'knight_move_target'|'knight_chase_target'|'knight_displace_target'|null
+let knightActionFrom = null; // vertexId of the knight performing move/chase/displace, while targeting
 
 let _wsPingInterval = null;
 
@@ -999,7 +1000,7 @@ function renderBoard() {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   // Sea border hexagon (like the original box)
   drawSeaHexagon();
-  drawHexes(); drawEdges(); drawVertices(); drawPorts(); drawRobber();
+  drawHexes(); drawEdges(); drawVertices(); drawPorts(); drawRobber(); drawKnights();
   updateBoardCursor();
 }
 
@@ -1009,16 +1010,18 @@ function updateBoardCursor() {
   const isMain  = state.phase==='main';
 
   // In web-player mode only show cursor hints when it's my turn
-  if (state.pendingRobber) {
+  if (state.pendingRobber || state.pendingKnightDisplace) {
     canvas.style.cursor = 'crosshair';
   } else if (isSetup && state.waitingForRoad && buildMode==='road') {
     canvas.style.cursor = 'cell';
   } else if (isSetup && !state.waitingForRoad && buildMode==='settlement') {
     canvas.style.cursor = 'cell';
-  } else if (!isSetup && (buildMode==='settlement' || buildMode==='city')) {
+  } else if (!isSetup && (buildMode==='settlement' || buildMode==='city' || buildMode==='knight')) {
     canvas.style.cursor = 'cell';
-  } else if (!isSetup && buildMode==='road') {
+  } else if (!isSetup && (buildMode==='road' || buildMode==='knight_move_target' || buildMode==='knight_displace_target')) {
     canvas.style.cursor = 'cell';
+  } else if (!isSetup && buildMode==='knight_chase_target') {
+    canvas.style.cursor = 'crosshair';
   } else {
     canvas.style.cursor = 'default';
   }
@@ -1247,6 +1250,7 @@ function drawVertices() {
     const x=px(v.x),y=py(v.y);
     const hlSett = buildMode==='settlement' && isValidSettlement(v.id);
     const hlCity = buildMode==='city'       && isValidCity(v.id);
+    const hlKnight = buildMode==='knight'   && isValidKnightSpot(v.id);
     if (v.building) {
       const col = state.players[v.owner].color;
       // Draw city upgrade highlight OVER the settlement if in city mode
@@ -1267,6 +1271,10 @@ function drawVertices() {
     } else if (hlSett) {
       ctx.beginPath(); ctx.arc(x,y,HEX_SIZE*.15,0,Math.PI*2);
       ctx.fillStyle='rgba(255,220,50,.88)'; ctx.fill();
+      ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
+    } else if (hlKnight) {
+      ctx.beginPath(); ctx.arc(x,y,HEX_SIZE*.16,0,Math.PI*2);
+      ctx.fillStyle='rgba(200,164,74,.85)'; ctx.fill();
       ctx.strokeStyle='#fff'; ctx.lineWidth=2; ctx.stroke();
     }
   }
@@ -1307,6 +1315,68 @@ function drawRobber() {
     ctx.strokeStyle='rgba(180,180,190,.7)'; ctx.lineWidth=2.5; ctx.stroke();
     ctx.font=`${HEX_SIZE*.44}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
     ctx.fillText('🦹', rx, ry);
+  }
+}
+
+// ===================================================================
+//  CITIES & KNIGHTS — knight pieces on the board
+// ===================================================================
+const KNIGHT_EMOJI = { basic: '🛡️', strong: '⚔️', mighty: '🐎' };
+
+function drawKnights() {
+  if (!state?.citiesKnights) return;
+
+  // Highlight valid retreat spots when a displacement is awaiting a choice
+  if (state.pendingKnightDisplace) {
+    for (const vid of state.pendingKnightDisplace.options) {
+      const v = state.board.vertices[vid];
+      const x = px(v.x), y = py(v.y);
+      ctx.beginPath(); ctx.arc(x, y, HEX_SIZE*.18, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(255,220,50,.9)'; ctx.lineWidth = HEX_SIZE*.06; ctx.stroke();
+    }
+  }
+  // Highlight valid targets while a move/displace action is being aimed
+  if (buildMode==='knight_move_target' || buildMode==='knight_displace_target') {
+    const fromVertex = state.board.vertices[knightActionFrom];
+    if (fromVertex) {
+      const rankVal = { basic:1, strong:2, mighty:3 };
+      const myKnight = state.players[state.currentPlayerIndex]?.knights?.find(k=>k.vertexId===knightActionFrom);
+      for (const eid of fromVertex.adjEdges) {
+        const e = state.board.edges[eid];
+        const otherId = e.v1===knightActionFrom ? e.v2 : e.v1;
+        const other = state.board.vertices[otherId];
+        let valid = false;
+        if (buildMode==='knight_move_target') {
+          valid = e.owner===state.currentPlayerIndex && other.owner===null && !state.players.some(p=>(p.knights||[]).some(k=>k.vertexId===otherId));
+        } else if (myKnight) {
+          const enemy = state.players.find(p => p.id!==state.currentPlayerIndex && (p.knights||[]).some(k=>k.vertexId===otherId));
+          const enemyKnight = enemy?.knights.find(k=>k.vertexId===otherId);
+          valid = e.owner!==null && !!enemyKnight && rankVal[myKnight.rank] > rankVal[enemyKnight.rank];
+        }
+        if (valid) {
+          const x = px(other.x), y = py(other.y);
+          ctx.beginPath(); ctx.arc(x, y, HEX_SIZE*.18, 0, Math.PI*2);
+          ctx.strokeStyle = 'rgba(200,164,74,.9)'; ctx.lineWidth = HEX_SIZE*.06; ctx.stroke();
+        }
+      }
+    }
+  }
+
+  for (const player of state.players) {
+    for (const knight of (player.knights || [])) {
+      const v = state.board.vertices[knight.vertexId];
+      if (!v) continue;
+      const x = px(v.x), y = py(v.y);
+      const r = HEX_SIZE * .24;
+      ctx.save();
+      if (!knight.active) ctx.globalAlpha = .55;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
+      ctx.fillStyle = player.color; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.font = `${r*1.3}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillText(KNIGHT_EMOJI[knight.rank] || '🛡️', x, y);
+      ctx.restore();
+    }
   }
 }
 
@@ -1649,6 +1719,7 @@ function updateButtonStates() {
   document.getElementById('btn-road').classList.toggle('active-mode', buildMode==='road');
   document.getElementById('btn-settlement').classList.toggle('active-mode', buildMode==='settlement');
   document.getElementById('btn-city').classList.toggle('active-mode', buildMode==='city');
+  document.getElementById('btn-knight')?.classList.toggle('active-mode', buildMode==='knight' || buildMode==='knight_move_target' || buildMode==='knight_chase_target' || buildMode==='knight_displace_target');
 
   // Undo button — available after dice roll, not during robber/discard
   const btnUndo = document.getElementById('btn-undo');
@@ -1667,6 +1738,12 @@ function updateButtonStates() {
     const hasCity = (p?.cities?.length||0) > 0;
     btnCk.disabled = !canAct;
     btnCk.classList.toggle('cant-afford', canAct && !(hasCity && hasAnyCommodity));
+
+    const btnKnight = document.getElementById('btn-knight');
+    const hasKnightRes = res.sheep>=1 && res.ore>=1;
+    const basicKnights = (p?.knights||[]).filter(k=>k.rank==='basic').length;
+    btnKnight.disabled = !canAct;
+    btnKnight.classList.toggle('cant-afford', canAct && !(hasKnightRes && basicKnights<2));
   }
 }
 
@@ -1775,6 +1852,14 @@ function onCanvasClick(e) {
     }
     return;
   }
+  if (state.pendingKnightDisplace) {
+    const vt=findClickedVertex(mx,my);
+    if (vt && state.pendingKnightDisplace.options.includes(vt.id)) {
+      send({type:'RESOLVE_KNIGHT_DISPLACE',vertexId:vt.id});
+      closeDrawers();
+    }
+    return;
+  }
   // Close drawers and recalc transform AFTER reading coordinates
   // but BEFORE any non-action click (open sea tap)
   if (state.phase==='setup1'||state.phase==='setup2') {
@@ -1791,7 +1876,27 @@ function onCanvasClick(e) {
   if (buildMode==='road')       { const ed=findClickedEdge(mx,my);   if(ed){ send({type:'BUILD_ROAD',edgeId:ed.id});       if(state.pendingRoadBuilding<=1) buildMode=null; } }
   else if (buildMode==='settlement') { const vt=findClickedVertex(mx,my); if(vt){ send({type:'BUILD_SETTLEMENT',vertexId:vt.id}); buildMode=null; } }
   else if (buildMode==='city')  { const vt=findClickedVertex(mx,my); if(vt){ send({type:'BUILD_CITY',vertexId:vt.id});      buildMode=null; } }
-  else { closeDrawers(); if (state) { calcBoardTransform(); renderBoard(); } }
+  else if (buildMode==='knight') { const vt=findClickedVertex(mx,my); if(vt){ send({type:'BUILD_KNIGHT',vertexId:vt.id}); buildMode=null; } }
+  else if (buildMode==='knight_move_target') {
+    const vt=findClickedVertex(mx,my);
+    if(vt){ send({type:'MOVE_KNIGHT',fromVertexId:knightActionFrom,toVertexId:vt.id}); buildMode=null; knightActionFrom=null; }
+  }
+  else if (buildMode==='knight_chase_target') {
+    const h=findClickedHex(mx,my);
+    if(h){ send({type:'CHASE_ROBBER_KNIGHT',vertexId:knightActionFrom,newHexId:h.id}); buildMode=null; knightActionFrom=null; }
+  }
+  else if (buildMode==='knight_displace_target') {
+    const vt=findClickedVertex(mx,my);
+    if(vt){ send({type:'DISPLACE_KNIGHT',fromVertexId:knightActionFrom,targetVertexId:vt.id}); buildMode=null; knightActionFrom=null; }
+  }
+  else {
+    const vt = findClickedVertex(mx,my);
+    if (vt && state.citiesKnights) {
+      const myKnight = state.players[state.currentPlayerIndex]?.knights?.find(k=>k.vertexId===vt.id);
+      if (myKnight) { openKnightActionsModal(vt.id); return; }
+    }
+    closeDrawers(); if (state) { calcBoardTransform(); renderBoard(); }
+  }
 }
 
 function findClickedHex(mx,my) {
@@ -1847,6 +1952,13 @@ function isValidCity(vId) {
   const v=state.board.vertices[vId];
   return v.owner===state.currentPlayerIndex && v.building==='settlement';
 }
+function isValidKnightSpot(vId) {
+  if (!state||state.phase!=='main'||!state.citiesKnights) return false;
+  const pid=state.currentPlayerIndex, v=state.board.vertices[vId];
+  if (v.owner!==null) return false;
+  if (state.players.some(p => (p.knights||[]).some(k=>k.vertexId===vId))) return false;
+  return v.adjEdges.some(eid=>state.board.edges[eid].owner===pid);
+}
 
 // ===================================================================
 //  BUTTON HANDLERS
@@ -1877,6 +1989,9 @@ document.getElementById('btn-settlement')?.addEventListener('click',()=>{
 });
 document.getElementById('btn-city')?.addEventListener('click',()=>{
   buildMode=buildMode==='city'?null:'city'; renderBoard(); updateButtonStates();
+});
+document.getElementById('btn-knight')?.addEventListener('click',()=>{
+  buildMode=buildMode==='knight'?null:'knight'; renderBoard(); updateButtonStates();
 });
 document.getElementById('btn-devcard')?.addEventListener('click',    ()=>send({type:'BUY_DEV_CARD'}));
 document.getElementById('btn-trade-bank')?.addEventListener('click', openTradeBankModal);
@@ -2101,6 +2216,97 @@ window.buyCityImprovement = track => {
       openCityImprovementsModal();
     }
   }, 150);
+};
+
+// ===================================================================
+//  CITIES & KNIGHTS — KNIGHT ACTIONS MODAL
+//  Clicking a vertex with one of your own knights (outside any build
+//  mode) opens this modal, listing whichever actions are currently
+//  valid for that specific knight.
+// ===================================================================
+function openKnightActionsModal(vertexId) {
+  const player = state.players[state.currentPlayerIndex];
+  const knight = player.knights?.find(k => k.vertexId === vertexId);
+  if (!knight) return;
+
+  const RANKS = ['basic','strong','mighty'];
+  const RANK_VAL = { basic:1, strong:2, mighty:3 };
+  const idx = RANKS.indexOf(knight.rank);
+  const canAffordKnightCost = (player.resources.sheep||0)>=1 && (player.resources.ore||0)>=1;
+  const canAffordActivate   = (player.resources.wheat||0)>=1;
+  const politicsLvl = player.cityImprovements?.politics || 0;
+
+  const vertex = state.board.vertices[vertexId];
+  const adjacentToRobber = vertex.adjHexes.includes(state.robberHexId);
+
+  // Is there a weaker enemy knight on an adjacent, road-connected vertex?
+  let canDisplace = false;
+  for (const eid of vertex.adjEdges) {
+    const e = state.board.edges[eid];
+    if (e.owner === null) continue;
+    const otherId = e.v1===vertexId ? e.v2 : e.v1;
+    for (const p of state.players) {
+      if (p.id === player.id) continue;
+      const ek = p.knights?.find(k=>k.vertexId===otherId);
+      if (ek && RANK_VAL[knight.rank] > RANK_VAL[ek.rank]) { canDisplace = true; break; }
+    }
+    if (canDisplace) break;
+  }
+
+  const rankName = t(`ck_knight_${knight.rank}`) || knight.rank;
+  const actions = [];
+
+  if (!knight.active) {
+    actions.push(`<button class="dev-card-btn${canAffordActivate?' playable':''}" ${canAffordActivate?'':'disabled'} onclick="knightAction('activate',${vertexId})">🌾 ${t('ck_activate')||'Attiva'} <small>(1🌾)</small></button>`);
+  }
+  if (idx < RANKS.length - 1) {
+    const nextRank = RANKS[idx+1];
+    const politicsBlocked = nextRank==='mighty' && politicsLvl < 3;
+    const disabled = politicsBlocked || !canAffordKnightCost;
+    const reason = politicsBlocked ? (t('ck_need_politics')||'Richiede Politica liv.3')
+                 : (!canAffordKnightCost ? (t('ck_missing')||'risorse insufficienti') : '');
+    actions.push(`<button class="dev-card-btn${disabled?'':' playable'}" ${disabled?'disabled':''} onclick="knightAction('promote',${vertexId})">⬆️ ${t('ck_promote')||'Promuovi'} <small>(1🐑1🪨)</small>${reason?`<div class="ck-reason">${reason}</div>`:''}</button>`);
+  }
+  if (knight.active && !knight.usedActionThisTurn) {
+    actions.push(`<button class="dev-card-btn playable" onclick="knightStartMove(${vertexId})">🚶 ${t('ck_move')||'Muovi'}</button>`);
+    if (adjacentToRobber) actions.push(`<button class="dev-card-btn playable" onclick="knightStartChase(${vertexId})">🦹 ${t('ck_chase_robber')||'Scaccia il Brigante'}</button>`);
+    if (canDisplace) actions.push(`<button class="dev-card-btn playable" onclick="knightStartDisplace(${vertexId})">⚔️ ${t('ck_displace')||'Respingi Cavaliere'}</button>`);
+  }
+  if (!actions.length) actions.push(`<div class="ck-reason">${t('ck_no_actions')||'Nessuna azione disponibile per questo cavaliere ora'}</div>`);
+
+  document.getElementById('knight-actions-list').innerHTML = `
+    <div class="ck-track-header">
+      <span class="ck-track-name">${KNIGHT_EMOJI[knight.rank]} ${rankName}</span>
+      <span class="ck-metro-badge">${knight.active ? (t('ck_active')||'Attivo') : (t('ck_inactive')||'Inattivo')}</span>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">${actions.join('')}</div>
+  `;
+  openModal('modal-knight-actions');
+}
+
+window.knightAction = (action, vertexId) => {
+  if (action==='activate') send({ type:'ACTIVATE_KNIGHT', vertexId });
+  else if (action==='promote') send({ type:'PROMOTE_KNIGHT', vertexId });
+  closeAllModals();
+  setTimeout(() => {
+    const stillOwned = state.players[state.currentPlayerIndex]?.knights?.some(k=>k.vertexId===vertexId);
+    if (stillOwned) openKnightActionsModal(vertexId);
+  }, 150);
+};
+window.knightStartMove = vertexId => {
+  knightActionFrom = vertexId; buildMode = 'knight_move_target';
+  closeAllModals(); renderBoard(); updateButtonStates();
+  showGameToast(t('ck_pick_destination')||'Scegli la destinazione sulla mappa', '', 4000);
+};
+window.knightStartChase = vertexId => {
+  knightActionFrom = vertexId; buildMode = 'knight_chase_target';
+  closeAllModals(); renderBoard(); updateButtonStates();
+  showGameToast(t('ck_pick_hex')||"Scegli l'esagono su cui spostare il brigante", '', 4000);
+};
+window.knightStartDisplace = vertexId => {
+  knightActionFrom = vertexId; buildMode = 'knight_displace_target';
+  closeAllModals(); renderBoard(); updateButtonStates();
+  showGameToast(t('ck_pick_enemy')||'Scegli il cavaliere nemico da respingere', '', 4000);
 };
 
 // Year of Plenty
