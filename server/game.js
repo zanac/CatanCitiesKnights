@@ -617,6 +617,7 @@ class CatanGame {
       if (this.debugResources) {
         for (const p of this.players) {
           p.resources = { wood:10, brick:10, sheep:10, wheat:10, ore:10 };
+          if (this.citiesKnights) p.commodities = { paper:10, cloth:10, coin:10 };
         }
       }
     } else {

@@ -1404,7 +1404,7 @@ function render() {
     const names={monopoly:skinLabel('monopoly','Monopolio'),knight:skinLabel('knight','Cavaliere'),roadBuilding:skinLabel('road_building','Strade'),yearOfPlenty:skinLabel('year_of_plenty','Abbondanza'),victoryPoint:'Punto Vittoria'};
     const parts = [];
     if (state.debugDevCard) parts.push('carta='+( names[state.debugDevCard]||state.debugDevCard));
-    if (state.debugResources) parts.push('10 risorse');
+    if (state.debugResources) parts.push(state.citiesKnights ? '10 risorse+commodity' : '10 risorse');
     if (state.debugForceDice) parts.push('dado='+state.debugForceDice);
     dbg.textContent = '🐛 DEBUG: ' + parts.join(' | ');
   } else { document.getElementById('debug-dev-banner')?.remove(); }
