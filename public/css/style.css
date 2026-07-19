@@ -314,7 +314,7 @@ html, body { width: 100%; height: 100%; overflow: hidden; font-family: 'Georgia'
 :root {
   --tab-w: 44px;
   --hud-h: 72px;
-  --drawer-left-w:  250px;
+  --drawer-left-w:  290px;
   --drawer-right-w: 230px;
   --drawer-bottom-h: 150px;
   --die-size: 44px;
