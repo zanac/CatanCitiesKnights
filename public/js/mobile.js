@@ -1042,7 +1042,8 @@ let discardAmounts = {};
 function showDiscardPanel() {
   const panel = document.getElementById('mob-discard-panel');
   const me    = state.players[MY_PLAYER_ID];
-  const tot   = Object.values(me.resources).reduce((a,b)=>a+b,0);
+  const ckOn  = !!state.citiesKnights;
+  const tot   = Object.values(me.resources).reduce((a,b)=>a+b,0) + (ckOn ? Object.values(me.commodities||{}).reduce((a,b)=>a+b,0) : 0);
   const must  = Math.floor(tot/2);
 
   document.getElementById('mob-discard-title').textContent = t('mob_discard_title');
@@ -1050,8 +1051,8 @@ function showDiscardPanel() {
   // Only build the form once per discard session — NOT every render
   if (!discardPanelBuilt) {
     discardPanelBuilt = true;
-    discardAmounts = {wood:0,brick:0,sheep:0,wheat:0,ore:0};
-    document.getElementById('mob-discard-resources').innerHTML = RES_LIST.map(r=>`
+    discardAmounts = {wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0};
+    const resRows = RES_LIST.map(r=>`
       <div class="mob-discard-row">
         <label>${resEmoji(r)} (${me.resources[r]||0})</label>
         <div class="mob-stepper">
@@ -1060,6 +1061,16 @@ function showDiscardPanel() {
           <button onclick="changeDiscard('${r}',1)">+</button>
         </div>
       </div>`).join('');
+    const comRows = ckOn ? MOB_CK_COMMODITIES.map(c=>`
+      <div class="mob-discard-row">
+        <label>${MOB_CK_COMMODITY_ICON[c]} (${me.commodities?.[c]||0})</label>
+        <div class="mob-stepper">
+          <button onclick="changeDiscard('${c}',-1)">−</button>
+          <span id="mdisc-${c}">0</span>
+          <button onclick="changeDiscard('${c}',1)">+</button>
+        </div>
+      </div>`).join('') : '';
+    document.getElementById('mob-discard-resources').innerHTML = resRows + comRows;
   }
   // Always update the info text
   const currentSum = Object.values(discardAmounts).reduce((a,b)=>a+b,0);
@@ -1071,14 +1082,16 @@ function showDiscardPanel() {
 
 window.changeDiscard=(res,d)=>{
   const me   = state.players[MY_PLAYER_ID];
-  const tot  = Object.values(me.resources).reduce((a,b)=>a+b,0);
+  const ckOn = !!state.citiesKnights;
+  const tot  = Object.values(me.resources).reduce((a,b)=>a+b,0) + (ckOn ? Object.values(me.commodities||{}).reduce((a,b)=>a+b,0) : 0);
   const must = Math.floor(tot/2);
   const currentSum = Object.values(discardAmounts).reduce((a,b)=>a+b,0);
+  const pool = mobTradePool(me, res);
 
   if (d > 0) {
-    // Block if already at limit OR would exceed this resource's stock
+    // Block if already at limit OR would exceed this card's stock
     if (currentSum >= must) return;
-    if ((discardAmounts[res]||0) >= (me.resources[res]||0)) return;
+    if ((discardAmounts[res]||0) >= (pool[res]||0)) return;
   }
   discardAmounts[res] = Math.max(0, (discardAmounts[res]||0) + d);
   document.getElementById(`mdisc-${res}`).textContent = discardAmounts[res];
@@ -1097,7 +1110,8 @@ window.changeDiscard=(res,d)=>{
 };
 document.getElementById('mob-btn-discard-confirm').addEventListener('click',()=>{
   const me=state.players[MY_PLAYER_ID];
-  const tot=Object.values(me.resources).reduce((a,b)=>a+b,0);
+  const ckOn = !!state.citiesKnights;
+  const tot=Object.values(me.resources).reduce((a,b)=>a+b,0) + (ckOn ? Object.values(me.commodities||{}).reduce((a,b)=>a+b,0) : 0);
   const must=Math.floor(tot/2);
   if(Object.values(discardAmounts).reduce((a,b)=>a+b,0)!==must){alert(t('discard_error',must));return;}
   discardPanelBuilt = false; // reset so next discard session builds fresh form
@@ -1800,21 +1814,44 @@ function renderMiniBoard() {
 //  BANK TRADE
 // ================================================================
 let bankGive=null, bankReceive=null;
+const MOB_CK_COMMODITIES = ['paper','cloth','coin'];
+const MOB_CK_COMMODITY_ICON = { paper:'📜', cloth:'🧵', coin:'🪙' };
+function mobTradePool(player, key) {
+  return MOB_CK_COMMODITIES.includes(key) ? (player.commodities||{}) : (player.resources||{});
+}
 document.getElementById('mob-btn-bank').addEventListener('click',()=>{
   bankGive=null; bankReceive=null;
   const me=state.players[MY_PLAYER_ID];
-  document.getElementById('mob-trade-give').innerHTML=RES_LIST.map(r=>{
+  const ckOn = !!state.citiesKnights;
+
+  const giveResHtml = RES_LIST.map(r=>{
     const ratio=getMobTradeRatio(me,r), have=me.resources[r]||0;
     const dis=have<ratio?'disabled':'';
     return `<button class="mob-res-btn" data-res="${r}" onclick="selBankGive('${r}')" ${dis}>
       <span class="re">${resEmoji(r)}</span><span>${resName(r)}</span><small>${have}/${ratio}</small>
     </button>`;
   }).join('');
-  document.getElementById('mob-trade-receive').innerHTML=RES_LIST.map(r=>{
+  const giveComHtml = ckOn ? MOB_CK_COMMODITIES.map(c=>{
+    const ratio=getMobCommodityTradeRatio(me), have=me.commodities?.[c]||0;
+    const dis=have<ratio?'disabled':'';
+    return `<button class="mob-res-btn" data-res="${c}" onclick="selBankGive('${c}')" ${dis}>
+      <span class="re">${MOB_CK_COMMODITY_ICON[c]}</span><span>${commodityName(c)}</span><small>${have}/${ratio}</small>
+    </button>`;
+  }).join('') : '';
+  document.getElementById('mob-trade-give').innerHTML = giveResHtml + giveComHtml;
+
+  const recvResHtml = RES_LIST.map(r=>{
     return `<button class="mob-res-btn" data-res="${r}" onclick="selBankRecv('${r}')">
       <span class="re">${resEmoji(r)}</span><span>${resName(r)}</span>
     </button>`;
   }).join('');
+  const recvComHtml = ckOn ? MOB_CK_COMMODITIES.map(c=>{
+    return `<button class="mob-res-btn" data-res="${c}" onclick="selBankRecv('${c}')">
+      <span class="re">${MOB_CK_COMMODITY_ICON[c]}</span><span>${commodityName(c)}</span>
+    </button>`;
+  }).join('') : '';
+  document.getElementById('mob-trade-receive').innerHTML = recvResHtml + recvComHtml;
+
   document.getElementById('mob-trade-ratio').textContent='';
   openMobModal('mob-modal-bank');
 });
@@ -1822,7 +1859,11 @@ window.selBankGive=r=>{
   bankGive=r;
   document.querySelectorAll('#mob-trade-give .mob-res-btn').forEach(b=>b.classList.toggle('selected',b.dataset.res===r));
   const me=state.players[MY_PLAYER_ID];
-  document.getElementById('mob-trade-ratio').textContent=t('pt_ratio_info',getMobTradeRatio(me,r),me.resources[r]||0,resEmoji(r)||r);
+  const isCommodity = MOB_CK_COMMODITIES.includes(r);
+  const ratio = isCommodity ? getMobCommodityTradeRatio(me) : getMobTradeRatio(me,r);
+  const have  = mobTradePool(me,r)[r]||0;
+  const icon  = isCommodity ? MOB_CK_COMMODITY_ICON[r] : (resEmoji(r)||r);
+  document.getElementById('mob-trade-ratio').textContent=t('pt_ratio_info',ratio,have,icon);
 };
 window.selBankRecv=r=>{
   bankReceive=r;
@@ -1841,26 +1882,63 @@ function getMobTradeRatio(player,resource){
   }
   return best;
 }
+// Cities & Knights: commodities only get the generic 3:1 harbor rate (no
+// 2:1 harbor exists for a specific commodity), 4:1 with no harbor at all.
+function getMobCommodityTradeRatio(player){
+  let best=4;
+  for(const vid of [...(player.settlements||[]),...(player.cities||[])]){
+    const port=state.board.vertices[vid]?.port;
+    if(port?.type==='any') best=Math.min(best,port.ratio);
+  }
+  return best;
+}
 
 // ================================================================
 //  PLAYER TRADE
 // ================================================================
-let ptTarget=null, ptOffer={wood:0,brick:0,sheep:0,wheat:0,ore:0}, ptWant={...ptOffer};
+let ptTarget=null, ptOffer={wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0}, ptWant={...ptOffer};
 document.getElementById('mob-btn-player').addEventListener('click',()=>{
-  ptTarget=null; ptOffer={wood:0,brick:0,sheep:0,wheat:0,ore:0}; ptWant={...ptOffer};
+  ptTarget=null; ptOffer={wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0}; ptWant={...ptOffer};
   renderPTModal(); openMobModal('mob-modal-player-trade');
 });
-window.selPTTarget=id=>{ptTarget=id; ptWant={wood:0,brick:0,sheep:0,wheat:0,ore:0}; renderPTModal();};
+window.selPTTarget=id=>{ptTarget=id; ptWant={wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0}; renderPTModal();};
 window.chMobPT=(side,res,d)=>{
   const me=state.players[MY_PLAYER_ID];
   const blind = state.hiddenResources ?? false;
-  if(side==='offer') ptOffer[res]=Math.max(0,Math.min(me.resources[res]||0,(ptOffer[res]||0)+d));
+  if(side==='offer') ptOffer[res]=Math.max(0,Math.min(mobTradePool(me,res)[res]||0,(ptOffer[res]||0)+d));
   else { const tgt=ptTarget!==null?state.players[ptTarget]:null;
     if(!tgt) return;
-    const max = blind ? 99 : (tgt.resources[res]||0);
+    const max = blind ? 99 : (mobTradePool(tgt,res)[res]||0);
     ptWant[res]=Math.max(0,Math.min(max,(ptWant[res]||0)+d)); }
   renderPTModal();
 };
+function mobPTRow(r, icon, label, tgt, me, blind) {
+  const ov=ptOffer[r]||0, wv=ptWant[r]||0;
+  const mh=mobTradePool(me,r)[r]||0;
+  const targetPool = tgt ? mobTradePool(tgt,r) : null;
+  const th=tgt ? (blind ? '?' : (targetPool[r]||0)) : '—';
+  const wantMax=tgt ? (blind ? 99 : (targetPool[r]||0)) : 0;
+  return `<div class="mob-pt-row">
+    <span class="mob-pt-emoji">${icon}</span>
+    <div class="mob-pt-name">${label}</div>
+    <div class="mob-pt-col">
+      <span class="mob-pt-col-head">${t('offer_label')||'Offri'}(${mh})</span>
+      <div class="mob-stepper">
+        <button onclick="chMobPT('offer','${r}',-1)">−</button>
+        <span style="${ov>0?'color:#f0c040;font-weight:bold':''}">${ov}</span>
+        <button onclick="chMobPT('offer','${r}',1)" ${ov>=mh?'disabled':''}>+</button>
+      </div>
+    </div>
+    <div class="mob-pt-col">
+      <span class="mob-pt-col-head">${t('want_label')||'Vuoi'}(${th})</span>
+      <div class="mob-stepper">
+        <button onclick="chMobPT('want','${r}',-1)" ${!tgt?'disabled':''}>−</button>
+        <span style="${wv>0?'color:#f0c040;font-weight:bold':''}">${wv}</span>
+        <button onclick="chMobPT('want','${r}',1)" ${!tgt||wv>=wantMax?'disabled':''}>+</button>
+      </div>
+    </div>
+  </div>`;
+}
 function renderPTModal(){
   const me=state.players[MY_PLAYER_ID], others=state.players.filter(p=>p.id!==MY_PLAYER_ID);
   const tgt=ptTarget!==null?state.players[ptTarget]:null;
@@ -1868,32 +1946,12 @@ function renderPTModal(){
   document.getElementById('mob-trade-targets').innerHTML=others.map(p=>
     `<button class="mob-target-btn ${ptTarget===p.id?'active':''}" style="--pcol:${p.color}"
              onclick="selPTTarget(${p.id})"><span style="color:${p.color}">●</span> ${escHtml(p.name)}</button>`).join('');
-  document.getElementById('mob-pt-rows').innerHTML=RES_LIST.map(r=>{
-    const ov=ptOffer[r]||0, wv=ptWant[r]||0;
-    const mh=me.resources[r]||0;
-    const th=tgt ? (blind ? '?' : (tgt.resources[r]||0)) : '—';
-    const wantMax=tgt ? (blind ? 99 : (tgt.resources[r]||0)) : 0;
-    return `<div class="mob-pt-row">
-      <span class="mob-pt-emoji">${resEmoji(r)}</span>
-      <div class="mob-pt-name">${resName(r)}</div>
-      <div class="mob-pt-col">
-        <span class="mob-pt-col-head">${t('offer_label')||'Offri'}(${mh})</span>
-        <div class="mob-stepper">
-          <button onclick="chMobPT('offer','${r}',-1)">−</button>
-          <span style="${ov>0?'color:#f0c040;font-weight:bold':''}">${ov}</span>
-          <button onclick="chMobPT('offer','${r}',1)" ${ov>=mh?'disabled':''}>+</button>
-        </div>
-      </div>
-      <div class="mob-pt-col">
-        <span class="mob-pt-col-head">${t('want_label')||'Vuoi'}(${th})</span>
-        <div class="mob-stepper">
-          <button onclick="chMobPT('want','${r}',-1)" ${!tgt?'disabled':''}>−</button>
-          <span style="${wv>0?'color:#f0c040;font-weight:bold':''}">${wv}</span>
-          <button onclick="chMobPT('want','${r}',1)" ${!tgt||wv>=wantMax?'disabled':''}>+</button>
-        </div>
-      </div>
-    </div>`;
-  }).join('');
+  const resRows = RES_LIST.map(r => mobPTRow(r, resEmoji(r), resName(r), tgt, me, blind)).join('');
+  const commodityRows = state.citiesKnights
+    ? MOB_CK_COMMODITIES.map(c => mobPTRow(c, MOB_CK_COMMODITY_ICON[c], commodityName(c), tgt, me, blind)).join('')
+    : '';
+  document.getElementById('mob-pt-rows').innerHTML = resRows +
+    (commodityRows ? `<div class="drawer-section-title" style="margin:10px 0 4px">${t('sec_city_improvements')||'Città & Cavalieri'}</div>${commodityRows}` : '');
 }
 document.getElementById('mob-btn-pt-send').addEventListener('click',()=>{
   const offer=Object.fromEntries(Object.entries(ptOffer).filter(([,v])=>v>0));
@@ -1912,11 +1970,12 @@ document.getElementById('mob-btn-pt-send').addEventListener('click',()=>{
 function showTradeAccept(trade){
   // trade = { fromId, toId, offer, want } — chiamata sul telefono del DESTINATARIO
   const from=state.players[trade.fromId], to=state.players[trade.toId];
-  const fmt=obj=>Object.entries(obj).filter(([,a])=>a>0).map(([r,a])=>`${a}×${resEmoji(r)}`).join(' ');
+  const chipIcon = r => MOB_CK_COMMODITIES.includes(r) ? MOB_CK_COMMODITY_ICON[r] : resEmoji(r);
+  const fmt=obj=>Object.entries(obj).filter(([,a])=>a>0).map(([r,a])=>`${a}×${chipIcon(r)}`).join(' ');
 
-  // Check if recipient has the requested resources
+  // Check if recipient has the requested resources/commodities
   const toMissing = Object.entries(trade.want||{})
-    .filter(([r,a])=>(to.resources[r]||0) < parseInt(a));
+    .filter(([r,a])=>(mobTradePool(to,r)[r]||0) < parseInt(a));
   const canAccept = toMissing.length === 0;
 
   document.getElementById('mob-accept-title').innerHTML=
@@ -2123,44 +2182,61 @@ function startMobHexFlash(total){
 }
 
 function computeMobGains(total){
-  const gains={};
-  if(!state||total===7) return gains;
+  const gains={}, commodityGains={};
+  if(!state||total===7) return {gains, commodityGains};
+  const HEX_COMMODITY = { wood:'paper', sheep:'cloth', ore:'coin' };
+  const ck = !!state.citiesKnights;
   for(const hex of state.board.hexes){
     if(hex.number!==total||hex.id===state.robberHexId) continue;
-    const amt = hex.resource==='desert'?0:1;
-    if(!amt) continue;
+    if(hex.resource==='desert') continue;
     for(const vid of hex.vertices){
       const v=state.board.vertices[vid];
       if(!v||v.owner==null) continue;
-      const mult=v.building==='city'?2:1;
+      const isCity = v.building==='city';
       if(!gains[v.owner]) gains[v.owner]={};
-      gains[v.owner][hex.resource]=(gains[v.owner][hex.resource]||0)+mult;
+      if(ck && isCity && HEX_COMMODITY[hex.resource]){
+        gains[v.owner][hex.resource]=(gains[v.owner][hex.resource]||0)+1;
+        const commodity = HEX_COMMODITY[hex.resource];
+        if(!commodityGains[v.owner]) commodityGains[v.owner]={};
+        commodityGains[v.owner][commodity]=(commodityGains[v.owner][commodity]||0)+1;
+      } else {
+        const mult = isCity?2:1;
+        gains[v.owner][hex.resource]=(gains[v.owner][hex.resource]||0)+mult;
+      }
     }
   }
-  return gains;
+  return {gains, commodityGains};
 }
 
 let mobGainsDismissed = false;
 
 function showMobGains(total){
   if (state?.winner !== null) return;
-  const gains = computeMobGains(total);
+  const { gains, commodityGains } = computeMobGains(total);
   const myGains = gains[MY_PLAYER_ID];
+  const myCommodityGains = commodityGains[MY_PLAYER_ID];
 
   // Update resources row with +N badges
   const me = state.players[MY_PLAYER_ID];
   const resEl = document.getElementById('mob-resources');
   if(me && resEl){
-    resEl.innerHTML = RES_LIST.map(r=>{
+    const resPills = RES_LIST.map(r=>{
       const n=me.resources[r]||0;
       const g=myGains?.[r];
       const badge=g?`<span class="mob-res-gain">+${g}</span>`:'';
       return `<div class="mob-res-pill${g?' gained':''}"><span>${resEmoji(r)}</span><span class="n">${n}</span>${badge}</div>`;
     }).join('');
+    const comPills = state.citiesKnights ? MOB_CK_COMMODITIES.map(c=>{
+      const n=me.commodities?.[c]||0;
+      const g=myCommodityGains?.[c];
+      const badge=g?`<span class="mob-res-gain">+${g}</span>`:'';
+      return `<div class="mob-res-pill${g?' gained':''}"><span>${MOB_CK_COMMODITY_ICON[c]}</span><span class="n">${n}</span>${badge}</div>`;
+    }).join('') : '';
+    resEl.innerHTML = resPills + comPills;
   }
 
   // If no gains for anyone, no dismiss needed
-  const anyGains = Object.keys(gains).length>0;
+  const anyGains = Object.keys(gains).length>0 || Object.keys(commodityGains).length>0;
   if(!anyGains) return;
 
   // Show gain summary banner (tap to dismiss)
@@ -2174,11 +2250,13 @@ function showMobGains(total){
     document.getElementById('screen-active').appendChild(banner);
   }
 
-  // Build summary: who got what
-  const lines = Object.entries(gains).map(([pid,g])=>{
+  // Build summary: who got what (resources + commodities)
+  const pids = new Set([...Object.keys(gains), ...Object.keys(commodityGains)]);
+  const lines = [...pids].map(pid=>{
     const p=state.players[pid];
-    const res=Object.entries(g).map(([r,n])=>`${n}×${resEmoji(r)}`).join(' ');
-    return `<span style="color:${p.color};font-weight:bold">${escHtml(p.name)}</span>: ${res}`;
+    const res=Object.entries(gains[pid]||{}).map(([r,n])=>`${n}×${resEmoji(r)}`).join(' ');
+    const com=Object.entries(commodityGains[pid]||{}).map(([c,n])=>`${n}×${MOB_CK_COMMODITY_ICON[c]}`).join(' ');
+    return `<span style="color:${p.color};font-weight:bold">${escHtml(p.name)}</span>: ${[res,com].filter(Boolean).join(' ')}`;
   });
   banner.innerHTML = `
     <div style="font-size:.85rem;color:#f0e6c8;margin-bottom:6px">${lines.join(' &nbsp;|&nbsp; ')}</div>

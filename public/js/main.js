@@ -272,6 +272,7 @@ function onMessage(data) { if (window._onMessageHook) window._onMessageHook(data
   const prevPendingSteal = state?.pendingSteal || false;
   const prevPendingRobber = state?.pendingRobber || false;
   const prevResources    = state ? state.players.map(p => ({...p.resources})) : null;
+  const prevCommodities  = state ? state.players.map(p => ({...(p.commodities||{})})) : null;
   const prevLastDrawn    = state?.lastDrawnCard || null;
   const prevSpecials     = state ? state.players.map(p => ({
     hasLongestRoad: p.hasLongestRoad, hasLargestArmy: p.hasLargestArmy
@@ -299,13 +300,14 @@ function onMessage(data) { if (window._onMessageHook) window._onMessageHook(data
 
   // Detect trade resolution (pendingTrade was present, now gone)
   if (!isFirstUpdate && prevPendingTrade && !state?.pendingTrade && prevResources && state) {
-    handleTradeResolution(prevPendingTrade, prevResources);
+    handleTradeResolution(prevPendingTrade, prevResources, prevCommodities);
   }
   // Detect robber/steal resolution — covers auto-steal (1 candidate) AND manual steal
   const stealJustResolved = (prevPendingSteal && !state?.pendingSteal) ||
                              (prevPendingRobber && !state?.pendingRobber && !state?.pendingSteal);
   if (!isFirstUpdate && stealJustResolved && prevResources && state) {
     const deltas = {};
+    const commodityDeltas = {};
     let anyChange = false;
     for (const p of state.players) {
       deltas[p.id] = {};
@@ -313,8 +315,15 @@ function onMessage(data) { if (window._onMessageHook) window._onMessageHook(data
         const diff = (p.resources[res]||0) - (prevResources[p.id][res]||0);
         if (diff !== 0) { deltas[p.id][res] = diff; anyChange = true; }
       }
+      if (state.citiesKnights) {
+        commodityDeltas[p.id] = {};
+        for (const c of ['paper','cloth','coin']) {
+          const diff = (p.commodities?.[c]||0) - (prevCommodities[p.id]?.[c]||0);
+          if (diff !== 0) { commodityDeltas[p.id][c] = diff; anyChange = true; }
+        }
+      }
     }
-    if (anyChange) showStealExchangePanel(deltas);
+    if (anyChange) showStealExchangePanel(deltas, commodityDeltas);
   }
 
   // Detect dev card purchase — skip on F5/reconnect (card was already seen)
@@ -2008,8 +2017,10 @@ function openTradeBankModal() {
   tradeGive=null; tradeReceive=null;
   const p=state.players[state.currentPlayerIndex];
   const res=['wood','brick','sheep','wheat','ore'];
+  const commodities = state.citiesKnights ? ['paper','cloth','coin'] : [];
+  const CK_COMMODITY_ICON = { paper: '📜', cloth: '🧵', coin: '🪙' };
 
-  document.getElementById('trade-give').innerHTML = res.map(r => {
+  const giveResHtml = res.map(r => {
     const ratio = getClientTradeRatio(p, r);
     const have  = p.resources[r]||0;
     const canAfford = have >= ratio;
@@ -2019,12 +2030,29 @@ function openTradeBankModal() {
       <small>${have} / ${ratio}</small>
     </button>`;
   }).join('');
+  const giveComHtml = commodities.map(c => {
+    const ratio = getClientCommodityTradeRatio(p);
+    const have  = p.commodities?.[c]||0;
+    const canAfford = have >= ratio;
+    return `<button class="res-pick-btn${canAfford?'':' res-cant-afford'}" data-res="${c}" onclick="selectTradeGive('${c}')" ${canAfford?'':'disabled'}>
+      <span class="res-emoji">${CK_COMMODITY_ICON[c]}</span>
+      <span>${commodityName(c)}</span>
+      <small>${have} / ${ratio}</small>
+    </button>`;
+  }).join('');
+  document.getElementById('trade-give').innerHTML = giveResHtml + giveComHtml;
 
-  document.getElementById('trade-receive').innerHTML = res.map(r => {
+  const receiveResHtml = res.map(r => {
     return `<button class="res-pick-btn" data-res="${r}" onclick="selectTradeReceive('${r}')">
       <span class="res-emoji">${resEmoji(r)}</span><span>${resName(r)}</span>
     </button>`;
   }).join('');
+  const receiveComHtml = commodities.map(c => {
+    return `<button class="res-pick-btn" data-res="${c}" onclick="selectTradeReceive('${c}')">
+      <span class="res-emoji">${CK_COMMODITY_ICON[c]}</span><span>${commodityName(c)}</span>
+    </button>`;
+  }).join('');
+  document.getElementById('trade-receive').innerHTML = receiveResHtml + receiveComHtml;
 
   document.getElementById('trade-ratio-info').textContent='';
   openModal('modal-trade-bank');
@@ -2032,16 +2060,31 @@ function openTradeBankModal() {
 window.selectTradeGive    = r=>{ tradeGive=r;    document.querySelectorAll('#trade-give .res-pick-btn').forEach(b=>b.classList.toggle('selected',b.dataset.res===r)); updateTradeRatioInfo(); };
 window.selectTradeReceive = r=>{ tradeReceive=r; document.querySelectorAll('#trade-receive .res-pick-btn').forEach(b=>b.classList.toggle('selected',b.dataset.res===r)); };
 
+const CK_COMMODITY_TYPES = ['paper','cloth','coin'];
 function updateTradeRatioInfo() {
   if (!tradeGive||!state) return;
-  const p=state.players[state.currentPlayerIndex], ratio=getClientTradeRatio(p,tradeGive);
-  document.getElementById('trade-ratio-info').textContent=`Tasso: ${ratio}:1 — Hai ${p.resources[tradeGive]||0} ${resEmoji(tradeGive)}`;
+  const p=state.players[state.currentPlayerIndex];
+  const isCommodity = CK_COMMODITY_TYPES.includes(tradeGive);
+  const ratio = isCommodity ? getClientCommodityTradeRatio(p) : getClientTradeRatio(p,tradeGive);
+  const have  = isCommodity ? (p.commodities?.[tradeGive]||0) : (p.resources[tradeGive]||0);
+  const icon  = isCommodity ? { paper:'📜',cloth:'🧵',coin:'🪙' }[tradeGive] : resEmoji(tradeGive);
+  document.getElementById('trade-ratio-info').textContent=`Tasso: ${ratio}:1 — Hai ${have} ${icon}`;
 }
 function getClientTradeRatio(p,res) {
   let best=4;
   for (const vid of [...(p.settlements||[]),...(p.cities||[])]) {
     const v=state.board.vertices[vid]; if (!v?.port) continue;
     if (v.port.type===res||v.port.type==='any') best=Math.min(best,v.port.ratio);
+  }
+  return best;
+}
+// Cities & Knights: commodities only ever get the generic 3:1 harbor rate
+// (no 2:1 harbor exists for a specific commodity), 4:1 with no harbor.
+function getClientCommodityTradeRatio(p) {
+  let best=4;
+  for (const vid of [...(p.settlements||[]),...(p.cities||[])]) {
+    const v=state.board.vertices[vid];
+    if (v?.port?.type==='any') best=Math.min(best,v.port.ratio);
   }
   return best;
 }
@@ -2063,13 +2106,13 @@ function showDiscardModal(forPlayerId) {
       && discardingPlayerId === newPlayerId) return;
   discardingPlayerId = newPlayerId;
   const p=state.players[discardingPlayerId];
-  const total=Object.values(p.resources).reduce((a,b)=>a+b,0);
+  const ckOn = !!state.citiesKnights;
+  const total=Object.values(p.resources).reduce((a,b)=>a+b,0) + (ckOn ? Object.values(p.commodities||{}).reduce((a,b)=>a+b,0) : 0);
   const must=Math.floor(total/2);
   document.getElementById('discard-title').textContent=t('discard_title',p.name);
   document.getElementById('discard-info').textContent=t('discard_info',total,must);
-  discardAmounts={wood:0,brick:0,sheep:0,wheat:0,ore:0};
-  document.getElementById('discard-resources').innerHTML=
-    ['wood','brick','sheep','wheat','ore'].map(r=>`
+  discardAmounts={wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0};
+  const resRows = ['wood','brick','sheep','wheat','ore'].map(r=>`
       <div class="discard-row">
         <label>${resEmoji(r)} ${resName(r)} (${p.resources[r]||0})</label>
         <div class="stepper">
@@ -2078,19 +2121,31 @@ function showDiscardModal(forPlayerId) {
           <button class="stepper-btn-plus" onclick="changeDiscard('${r}',1)">+</button>
         </div>
       </div>`).join('');
+  const comRows = ckOn ? ['paper','cloth','coin'].map(c=>`
+      <div class="discard-row">
+        <label>${{paper:'📜',cloth:'🧵',coin:'🪙'}[c]} ${commodityName(c)} (${p.commodities?.[c]||0})</label>
+        <div class="stepper">
+          <button onclick="changeDiscard('${c}',-1)">−</button>
+          <span id="discard-${c}">0</span>
+          <button class="stepper-btn-plus" onclick="changeDiscard('${c}',1)">+</button>
+        </div>
+      </div>`).join('') : '';
+  document.getElementById('discard-resources').innerHTML = resRows + comRows;
   openModal('modal-discard');
 }
 window.changeDiscard=(res,delta)=>{
   if (!state || discardingPlayerId === null || discardingPlayerId === undefined) return;
   const p    = state.players[discardingPlayerId];
   if (!p) return;
-  const tot  = Object.values(p.resources).reduce((a,b)=>a+b,0);
+  const ckOn = !!state.citiesKnights;
+  const tot  = Object.values(p.resources).reduce((a,b)=>a+b,0) + (ckOn ? Object.values(p.commodities||{}).reduce((a,b)=>a+b,0) : 0);
   const must = Math.floor(tot/2);
   const currentSum = Object.values(discardAmounts).reduce((a,b)=>a+b,0);
+  const pool = tradePool(p, res);
 
   if (delta > 0) {
-    if (currentSum >= must) return;                         // total limit reached
-    if ((discardAmounts[res]||0) >= (p.resources[res]||0)) return; // resource limit
+    if (currentSum >= must) return;                    // total limit reached
+    if ((discardAmounts[res]||0) >= (pool[res]||0)) return; // card limit
   }
   discardAmounts[res] = Math.max(0, (discardAmounts[res]||0) + delta);
   document.getElementById(`discard-${res}`).textContent = discardAmounts[res];
@@ -2109,7 +2164,8 @@ window.changeDiscard=(res,delta)=>{
 document.getElementById('btn-discard-confirm')?.addEventListener('click',()=>{
   const total=Object.values(discardAmounts).reduce((a,b)=>a+b,0);
   const p=state.players[discardingPlayerId];
-  const must=Math.floor(Object.values(p.resources).reduce((a,b)=>a+b,0)/2);
+  const ckOn = !!state.citiesKnights;
+  const must=Math.floor((Object.values(p.resources).reduce((a,b)=>a+b,0) + (ckOn ? Object.values(p.commodities||{}).reduce((a,b)=>a+b,0) : 0))/2);
   if (total!==must) return alert(t('discard_error', must));
   send({type:'DISCARD_RESOURCES',playerId:discardingPlayerId,resources:discardAmounts}); closeAllModals();
 });
@@ -2331,15 +2387,21 @@ window.playMonopoly=res=>{ send({type:'PLAY_DEV_CARD',cardType:'monopoly',params
 // ================================================================// ===================================================================
 //  PLAYER TRADE MODAL  — target-first, side-by-side resources
 // ===================================================================
-let ptOffer  = {wood:0,brick:0,sheep:0,wheat:0,ore:0};
-let ptWant   = {wood:0,brick:0,sheep:0,wheat:0,ore:0};
+let ptOffer  = {wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0};
+let ptWant   = {wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0};
 let ptTarget = null; // currently selected target player id
 
 const RES_LIST = ['wood','brick','sheep','wheat','ore'];
+const CK_TRADE_COMMODITIES = ['paper','cloth','coin'];
+const CK_TRADE_COMMODITY_ICON = { paper:'📜', cloth:'🧵', coin:'🪙' };
+// Which pool (resources or commodities) a trade-row key belongs to
+function tradePool(player, key) {
+  return CK_TRADE_COMMODITIES.includes(key) ? (player.commodities||{}) : (player.resources||{});
+}
 
 function openPlayerTradeModal() {
-  ptOffer  = {wood:0,brick:0,sheep:0,wheat:0,ore:0};
-  ptWant   = {wood:0,brick:0,sheep:0,wheat:0,ore:0};
+  ptOffer  = {wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0};
+  ptWant   = {wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0};
   ptTarget = null;
 
   renderPTFull();
@@ -2361,14 +2423,16 @@ function renderPTFull() {
 
   // ── Resource rows (side by side: my amounts | res | their amounts) ──
   const target = ptTarget !== null ? state.players[ptTarget] : null;
+  const blind    = state.hiddenResources ?? false;
 
-  const rows = RES_LIST.map(r => {
-    const myHave   = me.resources[r]||0;
-    const blind    = state.hiddenResources ?? false;
-    const theirHave = target ? (blind ? '?' : (target.resources[r]||0)) : '—';
-    const wantMax  = target ? (blind ? 99 : (target.resources[r]||0)) : 0;
-    const offerVal = ptOffer[r]||0;
-    const wantVal  = ptWant[r]||0;
+  function buildRow(r, icon, label, isCommodity) {
+    const myPool    = tradePool(me, r);
+    const targetPool = target ? tradePool(target, r) : null;
+    const myHave    = myPool[r]||0;
+    const theirHave = target ? (blind ? '?' : (targetPool[r]||0)) : '—';
+    const wantMax   = target ? (blind ? 99 : (targetPool[r]||0)) : 0;
+    const offerVal  = ptOffer[r]||0;
+    const wantVal   = ptWant[r]||0;
     return `
     <div class="pt-row">
       <div class="pt-side pt-side-me">
@@ -2380,8 +2444,8 @@ function renderPTFull() {
         </div>
       </div>
       <div class="pt-res-center">
-        <span class="pt-emoji">${resEmoji(r)}</span>
-        <span class="pt-resname">${resName(r)}</span>
+        <span class="pt-emoji">${icon}</span>
+        <span class="pt-resname">${label}</span>
       </div>
       <div class="pt-side pt-side-them">
         <div class="stepper">
@@ -2389,13 +2453,21 @@ function renderPTFull() {
           <span id="pt-want-${r}" class="${wantVal>0?'pt-active':''}">${wantVal}</span>
           <button onclick="changePT('want','${r}',1)" ${!target||wantVal>=wantMax?'disabled':''}>+</button>
         </div>
-        <span class="pt-count ${target&&!blind&&(target.resources[r]||0)>0?'has':'zero'}">${theirHave}</span>
+        <span class="pt-count ${target&&!blind&&(targetPool[r]||0)>0?'has':'zero'}">${theirHave}</span>
       </div>
     </div>`;
-  }).join('');
+  }
 
+  const rows = RES_LIST.map(r => buildRow(r, resEmoji(r), resName(r), false)).join('');
+  const commodityRows = state.citiesKnights
+    ? CK_TRADE_COMMODITIES.map(c => buildRow(c, CK_TRADE_COMMODITY_ICON[c], commodityName(c), true)).join('')
+    : '';
+
+  const targetTotalCards = target
+    ? Object.values(target.resources||{}).reduce((a,b)=>a+b,0) + (state.citiesKnights ? Object.values(target.commodities||{}).reduce((a,b)=>a+b,0) : 0)
+    : '';
   const headerRight = target
-    ? `<span style="color:${target.color}">${escHtml(target.name)}</span>${(state.hiddenResources??false) ? '' : (' ' + t('pt_have',target.resources ? Object.values(target.resources).reduce((a,b)=>a+b,0) : ''))}`
+    ? `<span style="color:${target.color}">${escHtml(target.name)}</span>${(state.hiddenResources??false) ? '' : (' ' + t('pt_have', targetTotalCards))}`
     : `<span class="muted">${t('choose_player')}</span>`;
 
   document.getElementById('player-trade-offer').innerHTML = `
@@ -2404,7 +2476,8 @@ function renderPTFull() {
       <div class="pt-header-res"></div>
       <div class="pt-header-them">${headerRight}</div>
     </div>
-    ${rows}`;
+    ${rows}
+    ${commodityRows ? `<div class="drawer-section-title" style="margin:10px 0 4px">${t('sec_city_improvements')||'Città & Cavalieri'}</div>${commodityRows}` : ''}`;
 
   document.getElementById('player-trade-want').innerHTML = '';
 
@@ -2415,18 +2488,18 @@ function renderPTFull() {
     </button>` : ''}`;
 }
 
-window.selectPTTarget = id => { ptTarget = id; ptWant={wood:0,brick:0,sheep:0,wheat:0,ore:0}; renderPTFull(); };
+window.selectPTTarget = id => { ptTarget = id; ptWant={wood:0,brick:0,sheep:0,wheat:0,ore:0,paper:0,cloth:0,coin:0}; renderPTFull(); };
 
 window.changePT = (side, res, delta) => {
   const me = state.players[state.currentPlayerIndex];
   const target = ptTarget !== null ? state.players[ptTarget] : null;
   const blind = state.hiddenResources ?? false;
   if (side === 'offer') {
-    const max = me.resources[res]||0;
+    const max = tradePool(me, res)[res]||0;
     ptOffer[res] = Math.max(0, Math.min(max, (ptOffer[res]||0) + delta));
   } else {
     if (!target) return;
-    const max = blind ? 99 : (target.resources[res]||0);
+    const max = blind ? 99 : (tradePool(target, res)[res]||0);
     ptWant[res] = Math.max(0, Math.min(max, (ptWant[res]||0) + delta));
   }
   renderPTFull();
@@ -2439,7 +2512,9 @@ window.sendTradeOffer = targetId => {
   if (!Object.keys(want).length)  return showTradeError(t('trade_error_want'));
   const me = state.players[state.currentPlayerIndex];
   for (const [r,a] of Object.entries(offer)) {
-    if ((me.resources[r]||0) < a) return showTradeError('Non hai abbastanza ' + resEmoji(r) + ' ' + r);
+    const pool = tradePool(me, r);
+    const icon = CK_TRADE_COMMODITIES.includes(r) ? CK_TRADE_COMMODITY_ICON[r] : resEmoji(r);
+    if ((pool[r]||0) < a) return showTradeError('Non hai abbastanza ' + icon + ' ' + r);
   }
   // Manda proposta al server — il server salva pendingTrade e lo stato torna a tutti
   // checkModals() aprirà la modale accettazione quando arriva il nuovo state
@@ -2458,16 +2533,18 @@ function showTradeAcceptModal(targetId, offer, want, fromId) {
   const to   = state.players[targetId];
   const blind = state.hiddenResources ?? false;
 
+  const chipIcon = r => CK_TRADE_COMMODITIES.includes(r) ? CK_TRADE_COMMODITY_ICON[r] : resEmoji(r);
+  const chipName = r => CK_TRADE_COMMODITIES.includes(r) ? commodityName(r) : resName(r);
   const fmtRes = obj => Object.entries(obj||{})
     .filter(([,a])=>+a>0)
-    .map(([r,a])=>`<span class="trade-res-chip">${a}× ${resEmoji(r)||r} <small>${resName(r)}</small></span>`)
+    .map(([r,a])=>`<span class="trade-res-chip">${a}× ${chipIcon(r)||r} <small>${chipName(r)}</small></span>`)
     .join('') || '—';
 
   // In blind mode: recipient checks only their own resources (what they must give = want)
   // In normal mode: also check from's resources client-side
   const toMissing = Object.entries(want)
-    .filter(([r,a])=>(to.resources[r]||0) < parseInt(a))
-    .map(([r,a])=>`${resEmoji(r)} ${r}: ha ${to.resources[r]||0}, serve ${a}`);
+    .filter(([r,a])=>(tradePool(to, r)[r]||0) < parseInt(a))
+    .map(([r,a])=>`${chipIcon(r)} ${r}: ha ${tradePool(to, r)[r]||0}, serve ${a}`);
 
   document.getElementById('trade-accept-title').innerHTML =
     `<span style="color:${from.color}">⚡ ${escHtml(from.name)}</span> propone a <span style="color:${to.color}">${escHtml(to.name)}</span>`;
@@ -2939,20 +3016,32 @@ function showResourceGainPopups(gameState) {
   if (gameState.winner !== null) return;
   const total = gameState.diceValues[0] + gameState.diceValues[1];
 
-  // ── Calculate gains ──
+  // ── Calculate gains (mirrors server _distributeResources, including the
+  // Cities & Knights commodity split when that variant is on) ──
+  const HEX_COMMODITY = { wood: 'paper', sheep: 'cloth', ore: 'coin' };
+  const ck = !!gameState.citiesKnights;
   const gains = {};
+  const commodityGains = {};
   for (const hex of gameState.board.hexes) {
     if (hex.number !== total || hex.id === gameState.robberHexId) continue;
     for (const vid of hex.vertices) {
       const v = gameState.board.vertices[vid];
       if (v.owner === null) continue;
-      const amt = v.building === 'city' ? 2 : 1;
+      const isCity = v.building === 'city';
       if (!gains[v.owner]) gains[v.owner] = {};
-      gains[v.owner][hex.resource] = (gains[v.owner][hex.resource]||0) + amt;
+      if (ck && isCity && HEX_COMMODITY[hex.resource]) {
+        gains[v.owner][hex.resource] = (gains[v.owner][hex.resource]||0) + 1;
+        const commodity = HEX_COMMODITY[hex.resource];
+        if (!commodityGains[v.owner]) commodityGains[v.owner] = {};
+        commodityGains[v.owner][commodity] = (commodityGains[v.owner][commodity]||0) + 1;
+      } else {
+        const amt = isCity ? 2 : 1;
+        gains[v.owner][hex.resource] = (gains[v.owner][hex.resource]||0) + amt;
+      }
     }
   }
 
-  const anyGains = Object.keys(gains).length > 0;
+  const anyGains = Object.keys(gains).length > 0 || Object.keys(commodityGains).length > 0;
 
   // ── Force-open left drawer and wait for CSS transition (280ms) ──
   drawerState.players = true;
@@ -2974,7 +3063,7 @@ function showResourceGainPopups(gameState) {
   document.body.classList.add('gain-blocking');
 
   // Rebuild player cards with gain highlights
-  renderPlayersWithGains(gameState, gains);
+  renderPlayersWithGains(gameState, gains, commodityGains);
 
   // ── After drawer transition finishes, position floating badges ──
   const popupContainer = document.getElementById('gain-popups');
@@ -2984,18 +3073,23 @@ function showResourceGainPopups(gameState) {
     if (anyGains) {
       const panel = document.getElementById('players-panel');
       const cards = panel.querySelectorAll('.player-card');
+      const CK_COMMODITY_ICON = { paper: '📜', cloth: '🧵', coin: '🪙' };
       for (const card of cards) {
         const pid = parseInt(card.dataset.pid);
-        if (isNaN(pid) || !gains[pid]) continue;
+        if (isNaN(pid) || (!gains[pid] && !commodityGains[pid])) continue;
         const rect = card.getBoundingClientRect();
         const pop  = document.createElement('div');
         pop.className = 'gain-popup';
         pop.style.left = (rect.right + 10) + 'px';
         pop.style.top  = (rect.top + rect.height / 2 - 24) + 'px';
         pop.style.borderColor = gameState.players[pid].color;
-        pop.innerHTML = Object.entries(gains[pid])
+        const resPart = Object.entries(gains[pid]||{})
           .map(([r,a]) => `<span>+${a} ${resEmoji(r)}</span>`)
           .join('');
+        const comPart = Object.entries(commodityGains[pid]||{})
+          .map(([c,a]) => `<span>+${a} ${CK_COMMODITY_ICON[c]}</span>`)
+          .join('');
+        pop.innerHTML = resPart + comPart;
         popupContainer.appendChild(pop);
         requestAnimationFrame(() => pop.classList.add('visible'));
       }
@@ -3028,7 +3122,7 @@ function showResourceGainPopups(gameState) {
 }
 
 // Render player panel with gained resources highlighted
-function renderPlayersWithGains(gameState, gains) {
+function renderPlayersWithGains(gameState, gains, commodityGains = {}) {
   const panel = document.getElementById('players-panel');
   panel.innerHTML = '';
   const curIdx = gameState.phase==='main' ? gameState.currentPlayerIndex
@@ -3043,6 +3137,7 @@ function renderPlayersWithGains(gameState, gains) {
     card.dataset.pid = p.id;
 
     const playerGains = gains[p.id] || {};
+    const playerCommodityGains = commodityGains[p.id] || {};
     const res = p.resources;
     const hide = shouldHideRes(p);
 
@@ -3059,6 +3154,20 @@ function renderPlayersWithGains(gameState, gains) {
         ${gainBadge}
       </div>`;
     }).join('');
+
+    const ckHtml = gameState.citiesKnights ? `<div class="player-commodities">${
+      [['paper','📜'],['cloth','🧵'],['coin','🪙']].map(([c,icon]) => {
+        const gained = playerCommodityGains[c] || 0;
+        const total  = p.commodities?.[c] || 0;
+        const cls    = gained > 0 ? ' gained' : '';
+        const gainBadge = gained > 0 ? `<span class="res-gain-delta">+${gained}</span>` : '';
+        return `<div class="res-badge${cls}" data-tip="${commodityName(c)}">
+          <span class="res-icon">${icon}</span>
+          <span>${hide ? (gained > 0 ? '' : '?') : total}</span>
+          ${gainBadge}
+        </div>`;
+      }).join('')
+    }</div>` : '';
 
     const devCount = p.devCards?.length||0;
     const specials = badgeHTML(p);
@@ -3079,6 +3188,7 @@ function renderPlayersWithGains(gameState, gains) {
         ${qrBtnHtml}
       </div>
       <div class="player-resources">${resHtml}</div>
+      ${ckHtml}
       ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}
       ${specials?`<div class="player-specials">${specials}</div>`:''}`;
 
@@ -3090,7 +3200,7 @@ function renderPlayersWithGains(gameState, gains) {
 //  TRADE RESOLUTION FEEDBACK
 // ===================================================================
 
-function handleTradeResolution(prevTrade, prevResources) {
+function handleTradeResolution(prevTrade, prevResources, prevCommodities) {
   if (!state || !prevResources) return;
 
   // Did resources actually change? → trade was accepted
@@ -3100,16 +3210,22 @@ function handleTradeResolution(prevTrade, prevResources) {
   const to     = state.players[toId];
   if (!from || !to) return;
 
-  // Compare resources to detect accept vs reject
+  // Compare resources (and commodities, if C&K is on) to detect accept vs reject
   let anyChange = false;
   for (const res of ['wood','brick','sheep','wheat','ore']) {
     if ((state.players[fromId].resources[res]||0) !== (prevResources[fromId][res]||0)) { anyChange = true; break; }
     if ((state.players[toId].resources[res]||0)   !== (prevResources[toId][res]||0))   { anyChange = true; break; }
   }
+  if (!anyChange && state.citiesKnights && prevCommodities) {
+    for (const c of ['paper','cloth','coin']) {
+      if ((state.players[fromId].commodities?.[c]||0) !== (prevCommodities[fromId]?.[c]||0)) { anyChange = true; break; }
+      if ((state.players[toId].commodities?.[c]||0)   !== (prevCommodities[toId]?.[c]||0))   { anyChange = true; break; }
+    }
+  }
 
   if (anyChange) {
     // Trade ACCEPTED — compute deltas and show panel like dice gains
-    showTradeExchangePanel(prevTrade, prevResources);
+    showTradeExchangePanel(prevTrade, prevResources, prevCommodities);
   } else {
     // Trade REJECTED — show notification to proposer only
     showTradeRejectedToast(prevTrade);
@@ -3117,7 +3233,7 @@ function handleTradeResolution(prevTrade, prevResources) {
 }
 
 // Show resource changes panel after a steal (robber/knight)
-function showStealExchangePanel(deltas) {
+function showStealExchangePanel(deltas, commodityDeltas = {}) {
   // Open left drawer
   drawerState.players = true;
   drawerState.actions = false;
@@ -3128,7 +3244,7 @@ function showStealExchangePanel(deltas) {
   document.getElementById('tab-players').classList.add('open');
   calcBoardTransform(); renderBoard();
 
-  renderPlayersWithTradeDeltas(deltas);
+  renderPlayersWithTradeDeltas(deltas, commodityDeltas);
   document.body.classList.add('gain-blocking');
 
   // Floating badges
@@ -3138,18 +3254,25 @@ function showStealExchangePanel(deltas) {
   setTimeout(() => {
     const panel = document.getElementById('players-panel');
     const cards  = panel.querySelectorAll('.player-card');
+    const CK_COMMODITY_ICON = { paper: '📜', cloth: '🧵', coin: '🪙' };
     for (const card of cards) {
       const pid = parseInt(card.dataset.pid);
-      if (isNaN(pid) || !deltas[pid] || !Object.keys(deltas[pid]).length) continue;
+      const hasResDelta = deltas[pid] && Object.keys(deltas[pid]).length;
+      const hasComDelta = commodityDeltas[pid] && Object.keys(commodityDeltas[pid]).length;
+      if (isNaN(pid) || (!hasResDelta && !hasComDelta)) continue;
       const rect = card.getBoundingClientRect();
       const pop  = document.createElement('div');
       pop.className = 'gain-popup trade-popup';
       pop.style.left        = (rect.right + 10) + 'px';
       pop.style.top         = (rect.top + rect.height/2 - 24) + 'px';
       pop.style.borderColor = state.players[pid].color;
-      pop.innerHTML = Object.entries(deltas[pid])
+      const resPart = Object.entries(deltas[pid]||{})
         .map(([r,d]) => `<span class="${d>0?'delta-pos':'delta-neg'}">${d>0?'+':''}${d} ${resEmoji(r)}</span>`)
         .join('');
+      const comPart = Object.entries(commodityDeltas[pid]||{})
+        .map(([c,d]) => `<span class="${d>0?'delta-pos':'delta-neg'}">${d>0?'+':''}${d} ${CK_COMMODITY_ICON[c]}</span>`)
+        .join('');
+      pop.innerHTML = resPart + comPart;
       popupContainer.appendChild(pop);
       requestAnimationFrame(() => pop.classList.add('visible'));
     }
@@ -3176,17 +3299,25 @@ function showStealExchangePanel(deltas) {
 }
 
 // Show resource changes panel (like dice gains) after a trade
-function showTradeExchangePanel(trade, prevResources) {
+function showTradeExchangePanel(trade, prevResources, prevCommodities) {
   const fromId = trade.fromId, toId = trade.toId;
   const fromP  = state.players[fromId], toP = state.players[toId];
 
   // Build gains/losses per player
   const deltas = {};
+  const commodityDeltas = {};
   for (const pid of [fromId, toId]) {
     deltas[pid] = {};
     for (const res of ['wood','brick','sheep','wheat','ore']) {
       const diff = (state.players[pid].resources[res]||0) - (prevResources[pid][res]||0);
       if (diff !== 0) deltas[pid][res] = diff;
+    }
+    if (state.citiesKnights) {
+      commodityDeltas[pid] = {};
+      for (const c of ['paper','cloth','coin']) {
+        const diff = (state.players[pid].commodities?.[c]||0) - (prevCommodities?.[pid]?.[c]||0);
+        if (diff !== 0) commodityDeltas[pid][c] = diff;
+      }
     }
   }
 
@@ -3205,7 +3336,7 @@ function showTradeExchangePanel(trade, prevResources) {
   calcBoardTransform(); renderBoard();
 
   // Render player cards with trade deltas highlighted
-  renderPlayersWithTradeDeltas(deltas);
+  renderPlayersWithTradeDeltas(deltas, commodityDeltas);
 
   document.body.classList.add('gain-blocking');
 
@@ -3216,18 +3347,25 @@ function showTradeExchangePanel(trade, prevResources) {
   setTimeout(() => {
     const panel = document.getElementById('players-panel');
     const cards  = panel.querySelectorAll('.player-card');
+    const CK_COMMODITY_ICON = { paper: '📜', cloth: '🧵', coin: '🪙' };
     for (const card of cards) {
       const pid = parseInt(card.dataset.pid);
-      if (isNaN(pid) || !deltas[pid] || !Object.keys(deltas[pid]).length) continue;
+      const hasResDelta = deltas[pid] && Object.keys(deltas[pid]).length;
+      const hasComDelta = commodityDeltas[pid] && Object.keys(commodityDeltas[pid]).length;
+      if (isNaN(pid) || (!hasResDelta && !hasComDelta)) continue;
       const rect = card.getBoundingClientRect();
       const pop  = document.createElement('div');
       pop.className = 'gain-popup trade-popup';
       pop.style.left        = (rect.right + 10) + 'px';
       pop.style.top         = (rect.top + rect.height/2 - 24) + 'px';
       pop.style.borderColor = state.players[pid].color;
-      pop.innerHTML = Object.entries(deltas[pid])
+      const resPart = Object.entries(deltas[pid]||{})
         .map(([r,d]) => `<span class="${d>0?'delta-pos':'delta-neg'}">${d>0?'+':''}${d} ${resEmoji(r)}</span>`)
         .join('');
+      const comPart = Object.entries(commodityDeltas[pid]||{})
+        .map(([c,d]) => `<span class="${d>0?'delta-pos':'delta-neg'}">${d>0?'+':''}${d} ${CK_COMMODITY_ICON[c]}</span>`)
+        .join('');
+      pop.innerHTML = resPart + comPart;
       popupContainer.appendChild(pop);
       requestAnimationFrame(() => pop.classList.add('visible'));
     }
@@ -3255,7 +3393,7 @@ function showTradeExchangePanel(trade, prevResources) {
   }, 320);
 }
 
-function renderPlayersWithTradeDeltas(deltas) {
+function renderPlayersWithTradeDeltas(deltas, commodityDeltas = {}) {
   const panel  = document.getElementById('players-panel');
   panel.innerHTML = '';
   const curIdx = state.phase==='main' ? state.currentPlayerIndex
@@ -3269,6 +3407,7 @@ function renderPlayersWithTradeDeltas(deltas) {
     card.dataset.pid = p.id;
 
     const playerDeltas = deltas[p.id] || {};
+    const playerCommodityDeltas = commodityDeltas[p.id] || {};
     const res = p.resources;
     const hide = shouldHideRes(p);
     const resHtml = ['wood','brick','sheep','wheat','ore'].map(r => {
@@ -3277,6 +3416,16 @@ function renderPlayersWithTradeDeltas(deltas) {
       const badge = d ? `<span class="res-delta ${d>0?'delta-pos':'delta-neg'}">${d>0?'+':''}${d}</span>` : '';
       return `<div class="res-badge${cls}${hide?' res-hidden':''}" data-tip="${resName(r)}"><span class="res-icon">${resEmoji(r)}</span><span>${hide ? (d ? '' : '?') : (res[r]||0)}</span>${badge}</div>`;
     }).join('');
+
+    const ckHtml = state.citiesKnights ? `<div class="player-commodities">${
+      [['paper','📜'],['cloth','🧵'],['coin','🪙']].map(([c,icon]) => {
+        const d = playerCommodityDeltas[c];
+        const cls = d > 0 ? ' trade-gained' : d < 0 ? ' trade-lost' : '';
+        const badge = d ? `<span class="res-delta ${d>0?'delta-pos':'delta-neg'}">${d>0?'+':''}${d}</span>` : '';
+        const total = p.commodities?.[c] || 0;
+        return `<div class="res-badge${cls}" data-tip="${commodityName(c)}"><span class="res-icon">${icon}</span><span>${hide ? (d ? '' : '?') : total}</span>${badge}</div>`;
+      }).join('')
+    }</div>` : '';
 
     const devCount = p.devCards?.length||0;
     const specials = badgeHTML(p);
@@ -3294,6 +3443,7 @@ function renderPlayersWithTradeDeltas(deltas) {
         ${qrBtnHtml}
       </div>
       <div class="player-resources">${resHtml}</div>
+      ${ckHtml}
       ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}
       ${specials?`<div class="player-specials">${specials}</div>`:''}`;
     panel.appendChild(card);

@@ -37,6 +37,9 @@ const HEX_COMMODITY = { wood: 'paper', sheep: 'cloth', ore: 'coin' };
 
 // Cities & Knights: which commodity funds each city-improvement track
 const TRACK_COMMODITY = { trade: 'cloth', politics: 'coin', science: 'paper' };
+// The 3 commodity type names, used to tell resources and commodities apart
+// when trading (player-to-player or with the bank)
+const COMMODITY_TYPES = ['paper', 'cloth', 'coin'];
 
 // Cities & Knights: knights — build and promote cost the same; each player
 // has a limited physical supply of 2 knights per rank (6 total)
@@ -702,8 +705,9 @@ class CatanGame {
     if (discard !== Math.floor(total / 2)) return { error: 'Wrong discard amount' };
 
     for (const [res, amt] of Object.entries(resources)) {
-      if ((player.resources[res] || 0) < amt) return { error: 'Not enough resources' };
-      player.resources[res] -= amt;
+      const pool = this._playerPool(player, res);
+      if ((pool[res] || 0) < amt) return { error: 'Not enough resources' };
+      pool[res] -= amt;
     }
 
     this.pendingDiscard = this.pendingDiscard.filter(id => id !== playerId);
@@ -751,15 +755,22 @@ class CatanGame {
   stealResource(targetPlayerId) {
     const target = this.players[targetPlayerId];
 
-    // Pick a random resource from the target's hand
+    // Pick a random card from the target's hand — resources AND commodities,
+    // since the robber doesn't distinguish between them (official rule).
     const resources = Object.entries(target.resources)
       .filter(([, amt]) => amt > 0)
       .flatMap(([res, amt]) => Array(amt).fill(res));
+    const commodities = this.citiesKnights ? Object.entries(target.commodities || {})
+      .filter(([, amt]) => amt > 0)
+      .flatMap(([c, amt]) => Array(amt).fill(c)) : [];
+    const pool = [...resources, ...commodities];
 
-    if (resources.length > 0) {
-      const stolen = resources[Math.floor(Math.random() * resources.length)];
-      target.resources[stolen]--;
-      this.currentPlayer.resources[stolen] = (this.currentPlayer.resources[stolen] || 0) + 1;
+    if (pool.length > 0) {
+      const stolen = pool[Math.floor(Math.random() * pool.length)];
+      const stolenPool = this._playerPool(target, stolen);
+      const gainPool = this._playerPool(this.currentPlayer, stolen);
+      stolenPool[stolen]--;
+      gainPool[stolen] = (gainPool[stolen] || 0) + 1;
       this._log('log_steal', {name: this.currentPlayer.name, from: target.name});
     }
 
@@ -1183,27 +1194,31 @@ class CatanGame {
     for (const [r, a] of Object.entries(msg.offer || {})) {
       const amt = parseInt(a) || 0;
       if (amt <= 0) continue;
-      if ((from.resources[r] || 0) < amt)
-        return { error: `${from.name} non ha abbastanza ${r} (serve ${amt}, ha ${from.resources[r]||0})` };
+      const pool = this._playerPool(from, r);
+      if ((pool[r] || 0) < amt)
+        return { error: `${from.name} non ha abbastanza ${r} (serve ${amt}, ha ${pool[r]||0})` };
     }
     // Validate acceptor's side
     for (const [r, a] of Object.entries(msg.want || {})) {
       const amt = parseInt(a) || 0;
       if (amt <= 0) continue;
-      if ((to.resources[r] || 0) < amt)
-        return { error: `${to.name} non ha abbastanza ${r} (serve ${amt}, ha ${to.resources[r]||0})` };
+      const pool = this._playerPool(to, r);
+      if ((pool[r] || 0) < amt)
+        return { error: `${to.name} non ha abbastanza ${r} (serve ${amt}, ha ${pool[r]||0})` };
     }
 
     // Execute the exchange atomically
     for (const [r, a] of Object.entries(msg.offer || {})) {
       const amt = parseInt(a) || 0; if (amt <= 0) continue;
-      from.resources[r] -= amt;
-      to.resources[r] = (to.resources[r] || 0) + amt;
+      this._playerPool(from, r)[r] -= amt;
+      const toPool = this._playerPool(to, r);
+      toPool[r] = (toPool[r] || 0) + amt;
     }
     for (const [r, a] of Object.entries(msg.want || {})) {
       const amt = parseInt(a) || 0; if (amt <= 0) continue;
-      to.resources[r] -= amt;
-      from.resources[r] = (from.resources[r] || 0) + amt;
+      this._playerPool(to, r)[r] -= amt;
+      const fromPool = this._playerPool(from, r);
+      fromPool[r] = (fromPool[r] || 0) + amt;
     }
 
     const offerStr = Object.entries(msg.offer||{}).filter(([,v])=>v>0).map(([r,v])=>`${v}×${r}`).join('+');
@@ -1216,12 +1231,18 @@ class CatanGame {
     if (!this.diceRolled) return { error: 'Roll dice first' };
     if (give === receive) return { error: 'Cannot trade same resource' };
     const player = this.currentPlayer;
-    const ratio = this._getTradeRatio(player, give); // 2 if specific port, 3 if any-port, 4 otherwise
-    if ((player.resources[give] || 0) < ratio) {
-      return { error: `Servono ${ratio} ${give} (hai ${player.resources[give]||0})` };
+    const giveIsCommodity = COMMODITY_TYPES.includes(give);
+    if (giveIsCommodity && !this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+    if (COMMODITY_TYPES.includes(receive) && !this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
+
+    const givePool = this._playerPool(player, give);
+    const receivePool = this._playerPool(player, receive);
+    const ratio = giveIsCommodity ? this._getCommodityTradeRatio(player) : this._getTradeRatio(player, give);
+    if ((givePool[give] || 0) < ratio) {
+      return { error: `Servono ${ratio} ${give} (hai ${givePool[give]||0})` };
     }
-    player.resources[give] -= ratio;
-    player.resources[receive] = (player.resources[receive] || 0) + 1;
+    givePool[give] -= ratio;
+    receivePool[receive] = (receivePool[receive] || 0) + 1;
     this._log('log_bank_trade', {name: player.name, ratio, give, receive});
     return { ok: true, ratio };
   }
@@ -1265,7 +1286,9 @@ class CatanGame {
   }
 
   _totalResources(player) {
-    return Object.values(player.resources).reduce((a, b) => a + b, 0);
+    const resTotal = Object.values(player.resources).reduce((a, b) => a + b, 0);
+    const comTotal = this.citiesKnights ? Object.values(player.commodities || {}).reduce((a, b) => a + b, 0) : 0;
+    return resTotal + comTotal;
   }
 
   _canAfford(player, cost) {
@@ -1330,6 +1353,24 @@ class CatanGame {
       else if (port.type === 'any') best = Math.min(best, port.ratio);
     }
     return best;
+  }
+
+  // Cities & Knights: commodities only ever get the generic 3:1 harbor rate
+  // (there's no 2:1 harbor for a specific commodity in the base rules) —
+  // 4:1 with no harbor at all, same as resources.
+  _getCommodityTradeRatio(player) {
+    let best = 4;
+    for (const v of [...player.settlements, ...player.cities]) {
+      const port = this.board.vertices[v].port;
+      if (port?.type === 'any') best = Math.min(best, port.ratio);
+    }
+    return best;
+  }
+
+  // Cities & Knights: which pool (resources or commodities) a card type
+  // belongs to, so trade code can treat both uniformly.
+  _playerPool(player, type) {
+    return COMMODITY_TYPES.includes(type) ? player.commodities : player.resources;
   }
 
   // ── Longest Road ──────────────────────────────────────────────
