@@ -281,6 +281,7 @@ function onMessage(data) {
   const prevPendingRobber = state?.pendingRobber || false;
   const prevResources     = state ? state.players.map(p => ({...p.resources})) : null;
   const prevLastDrawn    = state?.lastDrawnCard || null;
+  const prevMaxProgressSeq = Math.max(0, ...((state?.lastDrawnProgressCards)||[]).map(d => d.seq||0));
   const prevSpecials     = state ? state.players.map(p => ({
     hasLongestRoad: p.hasLongestRoad, hasLargestArmy: p.hasLargestArmy
   })) : null;
@@ -301,6 +302,21 @@ function onMessage(data) {
         showMobToast(`${skinLabel('largest_army_emoji','⚔️')} ${escHtml(p.name)} — ${skinLabel('largest_army','Largest Army')}!`, 4000, 'toast-special');
       if (!p.hasLargestArmy && prev.hasLargestArmy)
         showMobToast(`${skinLabel('largest_army_emoji','⚔️')} ${escHtml(p.name)} — ${t('log_lost_largest_army')||'lost Largest Army'}`, 4000, 'toast-special');
+    }
+  }
+
+  // Cities & Knights: progress-card draw notifications — one per draw in the
+  // roll (several players can draw), identified by a monotonic seq. The card
+  // NAME is secret: only the owner sees it; everyone else sees just the color.
+  const drawnProgress = state?.lastDrawnProgressCards || [];
+  if (!isFirstUpdate) {
+    for (const d of drawnProgress.filter(d => (d.seq||0) > prevMaxProgressSeq)) {
+      const pName = state.players[d.playerId]?.name || '';
+      const icon = PROGRESS_COLOR_ICON[d.color] || '📗';
+      const what = d.playerId === MY_PLAYER_ID
+        ? (PROGRESS_CARD_NAMES[d.type] || d.type)
+        : (t('ck_progress_card_hidden') || 'una carta progresso');
+      showMobToast(`${icon} ${escHtml(pName)} pesca: ${what}`, 3500);
     }
   }
 
@@ -780,6 +796,49 @@ function render(prevRolled) {
     return;
   }
 
+  // ── Cities & Knights: barbarian city-loss choice required from ME,
+  //    even if it's not my turn (the attack can happen on anyone's roll) ──
+  const myBarbarianChoice = state.citiesKnights && state.pendingBarbarianChoices?.length > 0 &&
+    state.pendingBarbarianChoices[0].playerId === MY_PLAYER_ID;
+  if (myBarbarianChoice) {
+    showScreen('screen-active');
+    hideWaitOverlay();
+    renderTopBar(curIdx);
+    showBarbarianCityChoice(state.pendingBarbarianChoices[0]);
+    return;
+  } else {
+    const modal = document.getElementById('mob-modal-barbarian-choice');
+    if (modal.classList.contains('open')) closeMobModal('mob-modal-barbarian-choice');
+  }
+
+  // ── Cities & Knights: progress-card hand-limit discard required from ME,
+  //    even if it's not my turn ──
+  const myProgressDiscard = state.citiesKnights && state.pendingProgressDiscard?.includes(MY_PLAYER_ID);
+  if (myProgressDiscard) {
+    showScreen('screen-active');
+    hideWaitOverlay();
+    renderTopBar(curIdx);
+    showProgressDiscardChoice(MY_PLAYER_ID);
+    return;
+  } else {
+    const modal = document.getElementById('mob-modal-progress-discard');
+    if (modal.classList.contains('open')) closeMobModal('mob-modal-progress-discard');
+  }
+
+  // ── Cities & Knights: tied Defender of Catan — MY color pick is required,
+  //    even if it's not my turn (the attack can happen on anyone's roll) ──
+  const myDefenderChoice = state.citiesKnights && state.pendingDefenderCardChoice?.includes(MY_PLAYER_ID);
+  if (myDefenderChoice) {
+    showScreen('screen-active');
+    hideWaitOverlay();
+    renderTopBar(curIdx);
+    showDefenderColorChoice(MY_PLAYER_ID);
+    return;
+  } else {
+    const modal = document.getElementById('mob-modal-defender-choice');
+    if (modal.classList.contains('open')) closeMobModal('mob-modal-defender-choice');
+  }
+
   if (!isMyTurn) { renderWaitScreen(curIdx); return; }
 
   showScreen('screen-active');
@@ -821,7 +880,7 @@ function renderWaitScreen(curIdx) {
     p.hasLongestRoad ? `<span class="mob-medal road-medal" title="${skinLabel('longest_road','Longest Road')}">${skinLabel('longest_road_emoji','🛤')}🥇</span>` : '',
     p.hasLargestArmy ? `<span class="mob-medal army-medal" title="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇</span>` : '',
     (p.knightsPlayed||0)>0 && !p.hasLargestArmy ? `<span class="mob-medal knight-count">⚔️×${p.knightsPlayed}</span>` : '',
-    state.citiesKnights && ['trade','politics','science'].some(tr=>state.metropolises?.[tr]===p.id)
+    state.citiesKnights && ['trade','politics','science'].some(tr=>state.metropolises?.[tr]?.playerId===p.id)
       ? `<span class="mob-medal ck-metro-medal">🏛️</span>` : '',
   ].join('');
   if (pMedalHTML) {
@@ -931,7 +990,7 @@ function renderActionPanel() {
     document.getElementById('mob-roll-panel').classList.add('active');
     // Also show dev card btn in roll panel if knight is available
     const me2  = state.players[MY_PLAYER_ID];
-    const hasK = (me2?.devCards||[]).some(c=>!c.new&&c.type==='knight');
+    const hasK = !state.citiesKnights && (me2?.devCards||[]).some(c=>!c.new&&c.type==='knight');
     let knightBtn = document.getElementById('mob-knight-shortcut');
     if (hasK && !knightBtn) {
       knightBtn = document.createElement('button');
@@ -1135,7 +1194,9 @@ function updateBuildButtons() {
     canSetupSett || (ca && mobHasSettSpot && res.wood>=1&&res.brick>=1&&res.sheep>=1&&res.wheat>=1),
     ca&&mobHasSettSpot || canSetupSett);
   setBB('mob-btn-city',       ca&&res.wheat>=2&&res.ore>=3&&me.settlements.length>0,     ca);
-  setBB('mob-btn-devcard',    ca&&res.sheep>=1&&res.wheat>=1&&res.ore>=1&&state.devDeckSize>0
+  // Official C&K has no development cards: hide the button entirely
+  document.getElementById('mob-btn-devcard').style.display = state.citiesKnights ? 'none' : '';
+  setBB('mob-btn-devcard',    !state.citiesKnights&&ca&&res.sheep>=1&&res.wheat>=1&&res.ore>=1&&state.devDeckSize>0
     &&(state.unlimitedDev||!state.devCardBoughtThisTurn), ca);
   const othersPendingDiscard = (state.pendingDiscard||[]).filter(id=>id!==MY_PLAYER_ID);
   const isMySetupEndTurn = (state.phase==='setup1'||state.phase==='setup2') && state.pendingSetupEndTurn &&
@@ -1156,8 +1217,8 @@ function updateBuildButtons() {
   if(mobUndo) mobUndo.disabled=(!ca && !isSetupPhase)||!state.undoAvailable;
   document.getElementById('mob-btn-bank').disabled=!ca;
   document.getElementById('mob-btn-player').disabled=!ca;
-  const hasDev    = (me.devCards||[]).some(c=>!c.new);
-  const hasKnight = (me.devCards||[]).some(c=>!c.new&&c.type==='knight');
+  const hasDev    = !state.citiesKnights && (me.devCards||[]).some(c=>!c.new);
+  const hasKnight = !state.citiesKnights && (me.devCards||[]).some(c=>!c.new&&c.type==='knight');
   // Knight can be played before dice; other cards need dice rolled
   const canPlayNow = ca || (state.phase==='main' && !state.pendingRobber && hasKnight && !state.diceRolled);
   const hasPlayable= state.diceRolled ? hasDev : hasKnight;
@@ -1816,6 +1877,17 @@ function renderMiniBoard() {
 let bankGive=null, bankReceive=null;
 const MOB_CK_COMMODITIES = ['paper','cloth','coin'];
 const MOB_CK_COMMODITY_ICON = { paper:'📜', cloth:'🧵', coin:'🪙' };
+// Cities & Knights: progress card display names/icons (mirrors main.js;
+// Italian-only for now since no card is playable yet)
+const PROGRESS_CARD_NAMES = {
+  merchant:'Mercante', resourceMonopoly:'Monopolio Risorsa', commercialHarbor:'Porto Commerciale',
+  masterMerchant:'Gran Mercante', merchantFleet:'Flotta Mercantile', tradeMonopoly:'Monopolio Commercio',
+  spy:'Spia', bishop:'Vescovo', deserter:'Disertore', diplomat:'Diplomatico', intrigue:'Intrigo',
+  saboteur:'Sabotatore', warlord:'Signore della Guerra', wedding:'Matrimonio', constitution:'Costituzione',
+  alchemist:'Alchimista', crane:'Gru', inventor:'Inventore', irrigation:'Irrigazione', medicine:'Medicina',
+  mining:'Miniera', roadBuilding:'Costruzione Strade', smith:'Fabbro', engineer:'Ingegnere', printer:'Stampa'
+};
+const PROGRESS_COLOR_ICON = { trade:'🟡', politics:'🔵', science:'🟢' };
 function mobTradePool(player, key) {
   return MOB_CK_COMMODITIES.includes(key) ? (player.commodities||{}) : (player.resources||{});
 }
@@ -1967,6 +2039,84 @@ document.getElementById('mob-btn-pt-send').addEventListener('click',()=>{
   // Mostra messaggio di attesa al proponente
   showMobToast(t('propose_sent'));
 });
+// Cities & Knights: build a short, recognizable label for a city vertex
+// using the resources of its adjacent hexes (no board-click needed on mobile)
+function describeCityVertex(vertexId) {
+  const v = state.board.vertices[vertexId];
+  if (!v) return `#${vertexId}`;
+  const icons = (v.adjHexes || [])
+    .map(hid => state.board.hexes[hid])
+    .filter(h => h && h.resource !== 'desert')
+    .map(h => resEmoji(h.resource))
+    .join('');
+  return icons || `#${vertexId}`;
+}
+
+// Cities & Knights: modal for choosing which city to lose to a barbarian
+// attack — shown to the affected player even if it's not their turn.
+function showBarbarianCityChoice(choice) {
+  const list = document.getElementById('mob-barbarian-city-list');
+  list.innerHTML = choice.options.map(vid => `
+    <button class="mob-city-choice-btn" onclick="resolveBarbarianCityChoice(${vid})">
+      🏙️ ${describeCityVertex(vid)}
+    </button>`).join('');
+  openMobModal('mob-modal-barbarian-choice');
+}
+window.resolveBarbarianCityChoice = vid => {
+  send({ type: 'RESOLVE_BARBARIAN_CITY_CHOICE', vertexId: vid });
+  closeMobModal('mob-modal-barbarian-choice');
+};
+
+// Cities & Knights: mandatory discard down to the 4-card progress-hand limit
+let mobProgressDiscardSelected = [];
+function showProgressDiscardChoice(playerId) {
+  const p = state.players[playerId];
+  const excess = p.progressCards.length - 4;
+  document.getElementById('mob-progress-discard-info').textContent =
+    `Scarta ${excess} cart${excess>1?'e':'a'} (hai ${p.progressCards.length}, il limite è 4)`;
+  mobProgressDiscardSelected = [];
+  renderMobProgressDiscardList(playerId);
+  openMobModal('mob-modal-progress-discard');
+}
+function renderMobProgressDiscardList(playerId) {
+  const p = state.players[playerId];
+  const excess = p.progressCards.length - 4;
+  document.getElementById('mob-progress-discard-list').innerHTML = p.progressCards.map((c,idx) => {
+    const selected = mobProgressDiscardSelected.includes(idx);
+    return `<button class="mob-city-choice-btn" style="${selected?'background:rgba(220,60,60,.3)':''}" onclick="toggleMobProgressDiscard(${idx},${playerId})">
+      ${selected?'✅ ':''}${PROGRESS_COLOR_ICON[c.color]||'📗'} ${PROGRESS_CARD_NAMES[c.type]||c.type}
+    </button>`;
+  }).join('');
+  const btn = document.getElementById('mob-btn-progress-discard-confirm');
+  btn.disabled = mobProgressDiscardSelected.length !== excess;
+  btn.onclick = () => {
+    send({ type: 'DISCARD_PROGRESS_CARDS', playerId, indices: mobProgressDiscardSelected });
+    closeMobModal('mob-modal-progress-discard');
+  };
+}
+window.toggleMobProgressDiscard = (idx, playerId) => {
+  const p = state.players[playerId];
+  const excess = p.progressCards.length - 4;
+  const pos = mobProgressDiscardSelected.indexOf(idx);
+  if (pos >= 0) mobProgressDiscardSelected.splice(pos, 1);
+  else if (mobProgressDiscardSelected.length < excess) mobProgressDiscardSelected.push(idx);
+  renderMobProgressDiscardList(playerId);
+};
+
+// Cities & Knights: tied Defender of Catan — pick a progress-card color
+function showDefenderColorChoice(playerId) {
+  document.getElementById('mob-defender-choice-list').innerHTML =
+    ['trade','politics','science'].map(c =>
+      `<button class="mob-city-choice-btn" onclick="pickMobDefenderColor(${playerId},'${c}')">
+        ${PROGRESS_COLOR_ICON[c]||'📗'} ${t('ck_track_'+c) || c}
+      </button>`).join('');
+  openMobModal('mob-modal-defender-choice');
+}
+window.pickMobDefenderColor = (playerId, color) => {
+  send({ type: 'CHOOSE_DEFENDER_PROGRESS', playerId, color });
+  closeMobModal('mob-modal-defender-choice');
+};
+
 function showTradeAccept(trade){
   // trade = { fromId, toId, offer, want } — chiamata sul telefono del DESTINATARIO
   const from=state.players[trade.fromId], to=state.players[trade.toId];

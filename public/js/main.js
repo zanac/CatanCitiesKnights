@@ -39,6 +39,7 @@ let unlimitedDev  = true;  // default: unlimited dev cards per turn (house rule)
 let instantDev    = false; // default: dev cards need 1 turn to become playable
 let debugDevCard   = null;   // debug: force first dev card type
 let debugResources = false;  // debug: give 10 of each resource at game start
+let debugSkipSetup = false;  // debug: auto-place everyone's initial settlements/roads
 let debugForceDice = null;   // debug: force dice total (null = disabled)
 let selectedSkinId = 'standard';
 let currentWebLink = '';
@@ -195,7 +196,7 @@ function badgeHTML(p) {
   else if (kn > 0 && p.hasLargestArmy) badges[badges.length-1] = `<span class="medal-badge army-medal" data-tip="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇<sup>${kn}</sup></span>`;
   if (state?.citiesKnights && state.metropolises) {
     for (const tr of ['trade','politics','science']) {
-      if (state.metropolises[tr] === p.id) {
+      if (state.metropolises[tr]?.playerId === p.id) {
         const name = t(`ck_track_${tr}`) || tr;
         badges.push(`<span class="medal-badge ck-metro-medal" data-tip="${t('ck_metropolis')||'Metropoli'}: ${name}">🏛️</span>`);
       }
@@ -274,10 +275,14 @@ function onMessage(data) { if (window._onMessageHook) window._onMessageHook(data
   const prevResources    = state ? state.players.map(p => ({...p.resources})) : null;
   const prevCommodities  = state ? state.players.map(p => ({...(p.commodities||{})})) : null;
   const prevLastDrawn    = state?.lastDrawnCard || null;
+  const prevMaxProgressSeq = Math.max(0, ...((state?.lastDrawnProgressCards)||[]).map(d => d.seq||0));
   const prevSpecials     = state ? state.players.map(p => ({
     hasLongestRoad: p.hasLongestRoad, hasLargestArmy: p.hasLargestArmy
   })) : null;
   const prevPoints       = state ? state.players.map(p => p.points) : null;
+  const prevBarbarianProgress = state?.barbarianProgress ?? 0;
+  const prevDefenderPoints = state ? state.players.map(p => p.defenderPoints||0) : null;
+  const prevCitiesCount  = state ? state.players.map(p => (p.cities||[]).length) : null;
   // Track setup step to reset buildMode on turn change
   const prevSetupKey = state ? (state.phase + ':' + state.setupStep + ':' + state.waitingForRoad) : null;
   state = data.state;
@@ -326,12 +331,53 @@ function onMessage(data) { if (window._onMessageHook) window._onMessageHook(data
     if (anyChange) showStealExchangePanel(deltas, commodityDeltas);
   }
 
+  // Cities & Knights: detect a barbarian attack that just resolved (the
+  // fleet track went from a high value back to 0). We don't get a direct
+  // message for this — it's folded into the regular dice-roll state update —
+  // so we diff defenderPoints/city-counts against the pre-update snapshot
+  // to build a readable summary.
+  if (!isFirstUpdate && state?.citiesKnights && prevBarbarianProgress > 0 && state.barbarianProgress === 0
+      && prevDefenderPoints && prevCitiesCount) {
+    const gainedDefender = [];
+    const lostCity = [];
+    for (const p of state.players) {
+      if ((p.defenderPoints||0) > prevDefenderPoints[p.id]) gainedDefender.push(p.name);
+      if ((p.cities||[]).length < prevCitiesCount[p.id]) lostCity.push(p.name);
+    }
+    if (gainedDefender.length) {
+      showGameToast(`🛡️ ${t('ck_barbarian_won')||'I difensori respingono i barbari!'} ${gainedDefender.join(', ')} +1 ⭐ (${t('ck_defender_of_catan')||'Difensore di Catan'})`, '', 5000);
+    } else if (lostCity.length) {
+      showGameToast(`🏹 ${t('ck_barbarian_lost')||'I barbari sfondano le difese!'} ${lostCity.join(', ')}`, '', 5000);
+    } else if (state.pendingBarbarianChoices?.length) {
+      showGameToast(`🏹 ${t('ck_barbarian_lost')||'I barbari sfondano le difese!'}`, '', 5000);
+    }
+  }
+
   // Detect dev card purchase — skip on F5/reconnect (card was already seen)
   const newDrawn = state?.lastDrawnCard;
   if (!isFirstUpdate && newDrawn && (!prevLastDrawn || prevLastDrawn.card !== newDrawn.card ||
       prevLastDrawn.subtype !== newDrawn.subtype ||
       prevLastDrawn.playerId !== newDrawn.playerId)) {
     showDevCardDrawnPopup(newDrawn);
+  }
+
+  // Cities & Knights: progress-card draw notifications. The server appends
+  // to lastDrawnProgressCards during one roll (several players can draw),
+  // resets it on the next roll, and tags each entry with a monotonic seq —
+  // entries with seq greater than any previously seen are new. The card
+  // NAME is secret: it is shown only to the owner
+  // (or on the admin hotseat screen, WEB_PLAYER_ID === null, which by
+  // convention sees everything — same model as hidden resources); everyone
+  // else only sees the color drawn.
+  const drawnProgress = state?.lastDrawnProgressCards || [];
+  if (!isFirstUpdate) {
+    for (const d of drawnProgress.filter(d => (d.seq||0) > prevMaxProgressSeq)) {
+      const pName = state.players[d.playerId]?.name || '';
+      const icon = PROGRESS_COLOR_ICON[d.color] || '📗';
+      const canSeeType = WEB_PLAYER_ID === null || WEB_PLAYER_ID === d.playerId;
+      const what = canSeeType ? (PROGRESS_CARD_NAMES[d.type] || d.type) : (t('ck_progress_card_hidden') || 'una carta progresso');
+      showGameToast(`${icon} ${escHtml(pName)} pesca: ${what}`, '', 3500);
+    }
   }
 
   // Detect Longest Road / Largest Army badge changes
@@ -716,7 +762,7 @@ function startGame() {
   requestAnimationFrame(() => {
     canvas.width  = window.innerWidth;
     canvas.height = window.innerHeight;
-    send({ type: 'START_GAME', players, desertCenter, zeroResources, randomPorts, randomNumbers, quickGame, unlimitedDev, instantDev, hiddenResources, balancedResources, citiesKnights, skinId: selectedSkinId, debugDevCard, debugResources, debugForceDice });
+    send({ type: 'START_GAME', players, desertCenter, zeroResources, randomPorts, randomNumbers, quickGame, unlimitedDev, instantDev, hiddenResources, balancedResources, citiesKnights, skinId: selectedSkinId, debugDevCard, debugResources, debugForceDice, debugSkipSetup });
   });
 }
 
@@ -757,7 +803,7 @@ window.startPhoneHost = function() {
   document.getElementById('ph-pin-value').textContent = currentPin;
   history.replaceState({}, '', `?pin=${currentPin}`);
   send({ type: 'START_GAME', players, desertCenter, zeroResources, randomPorts, randomNumbers, quickGame, unlimitedDev, instantDev, hiddenResources, citiesKnights,
-         skinId: selectedSkinId, debugDevCard, debugResources, debugForceDice });
+         skinId: selectedSkinId, debugDevCard, debugResources, debugForceDice, debugSkipSetup });
 };
 
 window.phReset = function() {
@@ -1019,7 +1065,7 @@ function updateBoardCursor() {
   const isMain  = state.phase==='main';
 
   // In web-player mode only show cursor hints when it's my turn
-  if (state.pendingRobber || state.pendingKnightDisplace) {
+  if (state.pendingRobber || state.pendingKnightDisplace || state.pendingBarbarianChoices?.length > 0 || state.pendingMetropolisChoice) {
     canvas.style.cursor = 'crosshair';
   } else if (isSetup && state.waitingForRoad && buildMode==='road') {
     canvas.style.cursor = 'cell';
@@ -1255,11 +1301,15 @@ function drawEdges() {
 }
 
 function drawVertices() {
+  const barbCandidates = state.pendingBarbarianChoices?.length > 0 ? state.pendingBarbarianChoices[0].options : [];
+  const metroCandidates = state.pendingMetropolisChoice ? state.pendingMetropolisChoice.options : [];
   for (const v of state.board.vertices) {
     const x=px(v.x),y=py(v.y);
     const hlSett = buildMode==='settlement' && isValidSettlement(v.id);
     const hlCity = buildMode==='city'       && isValidCity(v.id);
     const hlKnight = buildMode==='knight'   && isValidKnightSpot(v.id);
+    const hlBarbarian = barbCandidates.includes(v.id);
+    const hlMetropolis = metroCandidates.includes(v.id);
     if (v.building) {
       const col = state.players[v.owner].color;
       // Draw city upgrade highlight OVER the settlement if in city mode
@@ -1269,6 +1319,16 @@ function drawVertices() {
         ctx.strokeStyle='rgba(255,220,50,.9)'; ctx.lineWidth=HEX_SIZE*.08; ctx.stroke();
         ctx.beginPath(); ctx.arc(x, y, HEX_SIZE*.28, 0, Math.PI*2);
         ctx.fillStyle='rgba(255,220,50,.18)'; ctx.fill();
+      }
+      if (hlBarbarian) {
+        // Red warning ring: this city is a candidate to be lost to barbarians
+        ctx.beginPath(); ctx.arc(x, y, HEX_SIZE*.30, 0, Math.PI*2);
+        ctx.strokeStyle='rgba(220,60,60,.95)'; ctx.lineWidth=HEX_SIZE*.09; ctx.stroke();
+      }
+      if (hlMetropolis) {
+        // Gold ring: this city is a candidate to become the metropolis
+        ctx.beginPath(); ctx.arc(x, y, HEX_SIZE*.30, 0, Math.PI*2);
+        ctx.strokeStyle='rgba(200,164,74,.95)'; ctx.lineWidth=HEX_SIZE*.09; ctx.stroke();
       }
       const bImg = skinBuildingImg(v.building, col);
       if (bImg) {
@@ -1405,6 +1465,7 @@ function render() {
     const parts = [];
     if (state.debugDevCard) parts.push('carta='+( names[state.debugDevCard]||state.debugDevCard));
     if (state.debugResources) parts.push(state.citiesKnights ? '10 risorse+commodity' : '10 risorse');
+    if (state.debugSkipSetup) parts.push('setup saltato');
     if (state.debugForceDice) parts.push('dado='+state.debugForceDice);
     dbg.textContent = '🐛 DEBUG: ' + parts.join(' | ');
   } else { document.getElementById('debug-dev-banner')?.remove(); }
@@ -1465,6 +1526,7 @@ function renderPlayers() {
       `<div class="res-badge${hide?' res-hidden':''}" data-tip="${resName(r)}"><span class="res-icon">${resEmoji(r)}</span><span>${hide ? '?' : (res[r]||0)}</span></div>`
     ).join('');
     const devCount = p.devCards?.length||0;
+    const progCount = p.progressCards?.length||0;
     const specials = badgeHTML(p);
     const ckHtml = state.citiesKnights ? `<div class="player-commodities">
         <div class="res-badge" data-tip="${commodityName('paper')}"><span class="res-icon">📜</span><span>${hide?'?':(p.commodities?.paper||0)}</span></div>
@@ -1487,7 +1549,7 @@ function renderPlayers() {
       </div>
       <div class="player-resources">${resHtml}</div>
       ${ckHtml}
-      ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}
+      ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}${state.citiesKnights&&progCount>0?`<div style="font-size:.72rem;color:#a8c8d0;margin-top:2px;cursor:pointer" onclick="openProgressHandModal(${p.id})">📗 ${progCount} carta${progCount>1?'e':''} progresso</div>`:''}
       ${specials?`<div class="player-specials">${specials}</div>`:''}`;
     panel.appendChild(card);
   }
@@ -1516,6 +1578,32 @@ function renderHUD() {
     d2.textContent = state.diceValues[1] ? dieChar(state.diceValues[1]) : '?';
   }
 
+  // Cities & Knights: event die + barbarian fleet progress
+  const die3 = document.getElementById('die3');
+  const barbTrack = document.getElementById('barbarian-track');
+  if (die3 && barbTrack) {
+    const ckOn = !!state.citiesKnights;
+    die3.classList.toggle('hidden', !ckOn);
+    barbTrack.classList.toggle('hidden', !ckOn);
+    if (ckOn) {
+      const EVENT_ICON = { ships:'🚢', trade:'⚖️', politics:'👑', science:'🔬' };
+      const EVENT_NAME  = { ships: t('ck_event_ships')||'Nave', trade: t('ck_track_trade')||'Commercio', politics: t('ck_track_politics')||'Politica', science: t('ck_track_science')||'Scienza' };
+      if (diceAnimating && state.diceRolled) {
+        die3.textContent = '?';
+        die3.setAttribute('data-tip', t('ck_event_die')||'Dado evento');
+      } else if (state.eventDie) {
+        die3.textContent = EVENT_ICON[state.eventDie] || '?';
+        die3.setAttribute('data-tip', EVENT_NAME[state.eventDie]);
+      } else {
+        die3.textContent = '?';
+      }
+      const progress = state.barbarianProgress || 0;
+      barbTrack.textContent = `🚢 ${progress}/7`;
+      const deckCounts = state.progressDeckCounts || {trade:0,politics:0,science:0};
+      barbTrack.setAttribute('data-tip', `${t('ck_event_die')||'Dado evento'} — 🟡${deckCounts.trade} 🔵${deckCounts.politics} 🟢${deckCounts.science}`);
+    }
+  }
+
   const setupB  = document.getElementById('setup-banner');
   const robberB = document.getElementById('robber-banner');
   if (state.phase==='setup1'||state.phase==='setup2') {
@@ -1526,6 +1614,19 @@ function renderHUD() {
   } else setupB.classList.add('hidden');
   robberB.classList.toggle('hidden', !state.pendingRobber);
   if (state.pendingRobber) robberB.textContent = skinLabel('robber', t('banner_robber'));
+
+  const barbChoiceB = document.getElementById('barbarian-choice-banner');
+  if (barbChoiceB) {
+    const hasChoice = state.citiesKnights && state.pendingBarbarianChoices?.length > 0;
+    barbChoiceB.classList.toggle('hidden', !hasChoice);
+    if (hasChoice) barbChoiceB.textContent = `🏹 ${t('ck_pick_lost_city')||'Scegli quale città perdere'}`;
+  }
+  const metroChoiceB = document.getElementById('metropolis-choice-banner');
+  if (metroChoiceB) {
+    const hasMetroChoice = !!state.pendingMetropolisChoice;
+    metroChoiceB.classList.toggle('hidden', !hasMetroChoice);
+    if (hasMetroChoice) metroChoiceB.textContent = `🏛️ ${t('ck_pick_metropolis_city')||'Scegli quale città diventa la Metropoli'}`;
+  }
   if (state.pendingSetupEndTurn) {
     setupB.classList.remove('hidden');
     setupB.textContent = `✅ ${t('setup_confirm')||'Placement done — press End Turn to confirm'}`;
@@ -1579,6 +1680,23 @@ function translateLogEntry(e) {
     case 'log_steal':        return t('log_steal', p.name, p.from);
     case 'log_longest_road': return `${p.name} ${skinLabel('log_longest_road', 'ha la Strada più Lunga')} (${p.len})`;
     case 'log_largest_army': return `${p.name} ${skinLabel('log_largest_army', 'ha il Grande Esercito')}`;
+    // ── Cities & Knights ──
+    case 'log_barbarian_advance': return t('log_ck_barbarian_advance', p.progress);
+    case 'log_barbarian_win':     return t('log_ck_barbarian_win');
+    case 'log_defender_of_catan': return t('log_ck_defender', p.name);
+    case 'log_defender_tie':      return t('log_ck_defender_tie', p.name);
+    case 'log_build_knight':      return t('log_ck_build_knight', p.name);
+    case 'log_activate_knight':   return t('log_ck_activate_knight', p.name);
+    case 'log_promote_knight':    return t('log_ck_promote_knight', p.name);
+    case 'log_move_knight':       return t('log_ck_move_knight', p.name);
+    case 'log_displace_knight':   return t('log_ck_displace_knight', p.name);
+    case 'log_knight_chase_robber': return t('log_ck_chase_robber', p.name);
+    case 'log_city_improvement':  return t('log_ck_city_improvement', p.name, t('ck_track_'+p.track) || p.track, p.level);
+    case 'log_metropolis_founded': return t('log_ck_metropolis_founded', p.name, t('ck_track_'+p.track) || p.track);
+    case 'log_metropolis_lost':   return t('log_ck_metropolis_lost', p.name, t('ck_track_'+p.track) || p.track);
+    case 'log_city_downgraded':   return t('log_ck_city_downgraded', p.name);
+    case 'log_progress_drawn':    return t('log_ck_progress_drawn', p.name, t('ck_track_'+p.color) || p.color);
+    case 'log_progress_vp':       return t('log_ck_progress_vp', p.name);
     default: return e.key;
   }
 }
@@ -1636,7 +1754,7 @@ function updateButtonStates() {
   if (window.__SPECTATOR_MODE) return; // spectator has no buttons to update
   const isMain  = state.phase==='main';
   const rolled  = state.diceRolled;
-  const pending = state.pendingRobber||state.pendingSteal;
+  const pending = state.pendingRobber||state.pendingSteal||state.pendingKnightDisplace||(state.pendingBarbarianChoices?.length>0)||state.pendingMetropolisChoice;
   const discard = state.pendingDiscard?.length>0;
   const rbuild  = state.pendingRoadBuilding>0;
   const pid     = state.currentPlayerIndex;
@@ -1695,11 +1813,12 @@ function updateButtonStates() {
   btnCity.disabled = !canAct;
   btnCity.classList.toggle('cant-afford', canAct && !(hasCityRes && hasCitySpot));
 
-  // ── Dev card ──
-  const canDev = canAct && res.sheep>=1 && res.wheat>=1 && res.ore>=1 && state.devDeckSize>0
+  // ── Dev card ── (official C&K has no development cards: hide entirely)
+  const canDev = !state.citiesKnights && canAct && res.sheep>=1 && res.wheat>=1 && res.ore>=1 && state.devDeckSize>0
     && (state.unlimitedDev || !state.devCardBoughtThisTurn);
   const btnDev = document.getElementById('btn-devcard');
-  btnDev.disabled = !canAct;
+  btnDev.style.display = state.citiesKnights ? 'none' : '';
+  btnDev.disabled = !canAct || state.citiesKnights;
   btnDev.classList.toggle('cant-afford', canAct && !canDev);
 
   // ── Trade bank ── grey if nothing tradeable at any ratio
@@ -1711,9 +1830,10 @@ function updateButtonStates() {
   document.getElementById('btn-trade-player').disabled = !canAct;
 
   // ── Play dev card — knight can be played before rolling ──
-  const hasKnight      = (p?.devCards||[]).some(c => !c.new && c.type==='knight');
-  const hasPlayableDev = (p?.devCards||[]).some(c => !c.new);
+  const hasKnight      = !state.citiesKnights && (p?.devCards||[]).some(c => !c.new && c.type==='knight');
+  const hasPlayableDev = !state.citiesKnights && (p?.devCards||[]).some(c => !c.new);
   const btnPlayDev = document.getElementById('btn-play-dev');
+  btnPlayDev.style.display = state.citiesKnights ? 'none' : '';
   // Enabled: main phase + not pending robber + (rolled OR has knight)
   const canPlayDev = isMain && !pending && (rolled ? hasPlayableDev : hasKnight);
   btnPlayDev.disabled = !canPlayDev;
@@ -1776,6 +1896,25 @@ function checkModals() {
     }
   }
   if (state.pendingSteal&&state.robberCandidates?.length>1&&amCurrentPlayer) { showStealModal(); return; }
+  // Cities & Knights: progress-card hand-limit discard (same visibility rule as resource discard)
+  if (state.pendingProgressDiscard?.length > 0) {
+    const myProgDiscard = WEB_PLAYER_ID === null
+      ? state.pendingProgressDiscard[0]
+      : state.pendingProgressDiscard.includes(WEB_PLAYER_ID) ? WEB_PLAYER_ID : null;
+    if (myProgDiscard !== null && myProgDiscard !== undefined) {
+      showProgressDiscardModal(myProgDiscard); return;
+    }
+  }
+  // Cities & Knights: tied Defender of Catan — each tied player picks a
+  // progress-card color (same visibility rule as the progress discard)
+  if (state.pendingDefenderCardChoice?.length > 0) {
+    const myDefChoice = WEB_PLAYER_ID === null
+      ? state.pendingDefenderCardChoice[0]
+      : state.pendingDefenderCardChoice.includes(WEB_PLAYER_ID) ? WEB_PLAYER_ID : null;
+    if (myDefChoice !== null && myDefChoice !== undefined) {
+      showDefenderChoiceModal(myDefChoice); return;
+    }
+  }
   // Show trade accept modal on desktop when a pending trade arrives
   const tradeModal = document.getElementById('modal-trade-accept');
   if (state.pendingTrade) {
@@ -1865,6 +2004,23 @@ function onCanvasClick(e) {
     const vt=findClickedVertex(mx,my);
     if (vt && state.pendingKnightDisplace.options.includes(vt.id)) {
       send({type:'RESOLVE_KNIGHT_DISPLACE',vertexId:vt.id});
+      closeDrawers();
+    }
+    return;
+  }
+  if (state.pendingBarbarianChoices?.length > 0) {
+    const vt=findClickedVertex(mx,my);
+    const current = state.pendingBarbarianChoices[0];
+    if (vt && current.options.includes(vt.id)) {
+      send({type:'RESOLVE_BARBARIAN_CITY_CHOICE',vertexId:vt.id});
+      closeDrawers();
+    }
+    return;
+  }
+  if (state.pendingMetropolisChoice) {
+    const vt=findClickedVertex(mx,my);
+    if (vt && state.pendingMetropolisChoice.options.includes(vt.id)) {
+      send({type:'RESOLVE_METROPOLIS_CHOICE',vertexId:vt.id});
       closeDrawers();
     }
     return;
@@ -2236,7 +2392,7 @@ function openCityImprovementsModal() {
     const overCityCap = nextLevel > (p.cities?.length || 0);
     const cantAfford = have < cost;
     const disabled = maxed || overCityCap || cantAfford;
-    const holdsMetro = state.metropolises?.[tr.id] === p.id;
+    const holdsMetro = state.metropolises?.[tr.id]?.playerId === p.id;
     const dots = Array.from({length:5}, (_,i)=>`<span class="ck-dot${i<level?' filled':''}"></span>`).join('');
     const trackName = skinLabel(`ck_track_${tr.id}`, t(`ck_track_${tr.id}`) || tr.id);
     let reason = '';
@@ -2267,7 +2423,10 @@ window.buyCityImprovement = track => {
   // Keep the modal open and refresh it so the player can buy the next
   // level right away without reopening (server broadcast lands async,
   // so we optimistically re-render from current local state on the next tick).
+  // Exception: if that purchase just triggered a metropolis-city choice,
+  // close the modal instead so the board highlight/banner is visible.
   setTimeout(() => {
+    if (state.pendingMetropolisChoice) { closeAllModals(); return; }
     if (document.getElementById('modal-city-improvements').classList.contains('open')) {
       openCityImprovementsModal();
     }
@@ -2364,6 +2523,73 @@ window.knightStartDisplace = vertexId => {
   closeAllModals(); renderBoard(); updateButtonStates();
   showGameToast(t('ck_pick_enemy')||'Scegli il cavaliere nemico da respingere', '', 4000);
 };
+window.openProgressHandModal = playerId => {
+  const p = state.players[playerId];
+  document.getElementById('progress-hand-title').textContent = `📗 Carte di ${p.name}`;
+  const list = document.getElementById('progress-hand-list');
+  if (!p.progressCards.length) {
+    list.innerHTML = `<div class="ck-reason">Nessuna carta</div>`;
+  } else {
+    list.innerHTML = p.progressCards.map(c => `
+      <div class="ck-track-row" style="padding:8px 12px">
+        <span class="ck-track-name">${PROGRESS_COLOR_ICON[c.color]||'📗'} ${PROGRESS_CARD_NAMES[c.type]||c.type}</span>
+      </div>`).join('');
+  }
+  openModal('modal-progress-hand');
+};
+
+// Cities & Knights: mandatory discard down to the 4-card progress-hand limit
+let progressDiscardSelected = [];
+function showProgressDiscardModal(playerId) {
+  const p = state.players[playerId];
+  const excess = p.progressCards.length - 4;
+  document.getElementById('progress-discard-title').textContent = `📗 ${p.name} deve scartare`;
+  document.getElementById('progress-discard-info').textContent =
+    `Scarta ${excess} cart${excess>1?'e':'a'} (hai ${p.progressCards.length}, il limite è 4)`;
+  progressDiscardSelected = [];
+  renderProgressDiscardList(playerId);
+  openModal('modal-progress-discard');
+}
+function renderProgressDiscardList(playerId) {
+  const p = state.players[playerId];
+  const excess = p.progressCards.length - 4;
+  document.getElementById('progress-discard-list').innerHTML = p.progressCards.map((c,idx) => {
+    const selected = progressDiscardSelected.includes(idx);
+    return `<div class="ck-track-row" style="padding:8px 12px;cursor:pointer;${selected?'border-color:#dc3c3c':''}" onclick="toggleProgressDiscardCard(${idx},${playerId})">
+      <span class="ck-track-name">${selected?'✅ ':''}${PROGRESS_COLOR_ICON[c.color]||'📗'} ${PROGRESS_CARD_NAMES[c.type]||c.type}</span>
+    </div>`;
+  }).join('');
+  const btn = document.getElementById('btn-progress-discard-confirm');
+  btn.disabled = progressDiscardSelected.length !== excess;
+  btn.onclick = () => {
+    send({ type: 'DISCARD_PROGRESS_CARDS', playerId, indices: progressDiscardSelected });
+    closeAllModals();
+  };
+}
+window.toggleProgressDiscardCard = (idx, playerId) => {
+  const p = state.players[playerId];
+  const excess = p.progressCards.length - 4;
+  const pos = progressDiscardSelected.indexOf(idx);
+  if (pos >= 0) progressDiscardSelected.splice(pos, 1);
+  else if (progressDiscardSelected.length < excess) progressDiscardSelected.push(idx);
+  renderProgressDiscardList(playerId);
+};
+
+// Cities & Knights: tied Defender of Catan — pick a progress-card color
+function showDefenderChoiceModal(playerId) {
+  const p = state.players[playerId];
+  document.getElementById('defender-choice-title').textContent = `🛡️ ${p.name}`;
+  document.getElementById('defender-choice-list').innerHTML =
+    ['trade','politics','science'].map(c =>
+      `<div class="ck-track-row" style="padding:8px 12px;cursor:pointer" onclick="pickDefenderColor(${playerId},'${c}')">
+        <span class="ck-track-name">${PROGRESS_COLOR_ICON[c]||'📗'} ${t('ck_track_'+c) || c}</span>
+      </div>`).join('');
+  openModal('modal-defender-choice');
+}
+window.pickDefenderColor = (playerId, color) => {
+  send({ type: 'CHOOSE_DEFENDER_PROGRESS', playerId, color });
+  closeAllModals();
+};
 
 // Year of Plenty
 let yopChoices=[];
@@ -2394,6 +2620,20 @@ let ptTarget = null; // currently selected target player id
 const RES_LIST = ['wood','brick','sheep','wheat','ore'];
 const CK_TRADE_COMMODITIES = ['paper','cloth','coin'];
 const CK_TRADE_COMMODITY_ICON = { paper:'📜', cloth:'🧵', coin:'🪙' };
+
+// Cities & Knights: progress card display names and per-color icon.
+// Names are Italian-only for now (no card is playable yet — this is the
+// minimal viewer needed to test the draw mechanism; proper per-language
+// names + effects come with the playable-card phases).
+const PROGRESS_CARD_NAMES = {
+  merchant:'Mercante', resourceMonopoly:'Monopolio Risorsa', commercialHarbor:'Porto Commerciale',
+  masterMerchant:'Gran Mercante', merchantFleet:'Flotta Mercantile', tradeMonopoly:'Monopolio Commercio',
+  spy:'Spia', bishop:'Vescovo', deserter:'Disertore', diplomat:'Diplomatico', intrigue:'Intrigo',
+  saboteur:'Sabotatore', warlord:'Signore della Guerra', wedding:'Matrimonio', constitution:'Costituzione',
+  alchemist:'Alchimista', crane:'Gru', inventor:'Inventore', irrigation:'Irrigazione', medicine:'Medicina',
+  mining:'Miniera', roadBuilding:'Costruzione Strade', smith:'Fabbro', engineer:'Ingegnere', printer:'Stampa'
+};
+const PROGRESS_COLOR_ICON = { trade:'🟡', politics:'🔵', science:'🟢' };
 // Which pool (resources or commodities) a trade-row key belongs to
 function tradePool(player, key) {
   return CK_TRADE_COMMODITIES.includes(key) ? (player.commodities||{}) : (player.resources||{});
@@ -2791,6 +3031,10 @@ window.toggleDebugRes = function() {
   debugResources = !debugResources;
   document.getElementById('dbg-res')?.classList.toggle('active', debugResources);
 };
+window.toggleDebugSkipSetup = function() {
+  debugSkipSetup = !debugSkipSetup;
+  document.getElementById('dbg-skip-setup')?.classList.toggle('active', debugSkipSetup);
+};
 window.setDebugDice = function(val) {
   debugForceDice = val || null;
 };
@@ -3170,6 +3414,7 @@ function renderPlayersWithGains(gameState, gains, commodityGains = {}) {
     }</div>` : '';
 
     const devCount = p.devCards?.length||0;
+    const progCount = p.progressCards?.length||0;
     const specials = badgeHTML(p);
     const mobConnected = state.mobileConnected?.[p.id];
 
@@ -3189,7 +3434,7 @@ function renderPlayersWithGains(gameState, gains, commodityGains = {}) {
       </div>
       <div class="player-resources">${resHtml}</div>
       ${ckHtml}
-      ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}
+      ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}${state.citiesKnights&&progCount>0?`<div style="font-size:.72rem;color:#a8c8d0;margin-top:2px;cursor:pointer" onclick="openProgressHandModal(${p.id})">📗 ${progCount} carta${progCount>1?'e':''} progresso</div>`:''}
       ${specials?`<div class="player-specials">${specials}</div>`:''}`;
 
     panel.appendChild(card);
@@ -3428,6 +3673,7 @@ function renderPlayersWithTradeDeltas(deltas, commodityDeltas = {}) {
     }</div>` : '';
 
     const devCount = p.devCards?.length||0;
+    const progCount = p.progressCards?.length||0;
     const specials = badgeHTML(p);
     const mobConnected = state.mobileConnected?.[p.id];
     const qrBtnHtml = `<button class="card-qr-btn" onclick="event.stopPropagation();showQRForPlayer(${p.id})">📱</button>`;
@@ -3444,7 +3690,7 @@ function renderPlayersWithTradeDeltas(deltas, commodityDeltas = {}) {
       </div>
       <div class="player-resources">${resHtml}</div>
       ${ckHtml}
-      ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}
+      ${devCount>0?`<div style="font-size:.72rem;color:#c8b080;margin-top:4px">🃏 ${devCount} carta${devCount>1?'e':''}</div>`:''}${state.citiesKnights&&progCount>0?`<div style="font-size:.72rem;color:#a8c8d0;margin-top:2px;cursor:pointer" onclick="openProgressHandModal(${p.id})">📗 ${progCount} carta${progCount>1?'e':''} progresso</div>`:''}
       ${specials?`<div class="player-specials">${specials}</div>`:''}`;
     panel.appendChild(card);
   }

@@ -49,6 +49,27 @@ const KNIGHT_RANKS = ['basic', 'strong', 'mighty'];
 const KNIGHT_RANK_LIMIT = 2;
 const MIGHTY_REQUIRES_POLITICS_LEVEL = 3; // the "Fortress" improvement
 
+// Cities & Knights: official progress card deck compositions (18 per color,
+// 54 total) — confirmed against the physical component list.
+const PROGRESS_CARD_COUNTS = {
+  trade: {
+    merchant: 6, resourceMonopoly: 4, commercialHarbor: 2,
+    masterMerchant: 2, merchantFleet: 2, tradeMonopoly: 2
+  },
+  politics: {
+    spy: 3, bishop: 2, deserter: 2, diplomat: 2, intrigue: 2,
+    saboteur: 2, warlord: 2, wedding: 2, constitution: 1
+  },
+  science: {
+    alchemist: 2, crane: 2, inventor: 2, irrigation: 2, medicine: 2,
+    mining: 2, roadBuilding: 2, smith: 2, engineer: 1, printer: 1
+  }
+};
+// Victory-point progress cards: played immediately on draw, don't count
+// toward the 4-card hand limit, and can't be stolen (e.g. by Spy)
+const VP_PROGRESS_CARDS = new Set(['constitution', 'printer']);
+const PROGRESS_HAND_LIMIT = 4;
+
 // Standard Catan dev card deck composition
 const DEV_CARD_COUNTS = {
   knight: 14, victoryPoint: 5, roadBuilding: 2, yearOfPlenty: 2, monopoly: 2
@@ -77,6 +98,7 @@ class CatanGame {
     this.instantDev    = !!options.instantDev;            // default OFF: cards are playable next turn
     this.winPoints      = options.quickGame ? 7 : 10;
     this.debugResources = options.debugResources || false;
+    this.debugSkipSetup = options.debugSkipSetup || false;
     this.debugForceDice = options.debugForceDice || null;
     this.hiddenResources = !!options.hiddenResources;   // default OFF: clients hide other players' counts
     this.balancedResources = !!options.balancedResources; // default OFF: no-cluster tile placement
@@ -150,8 +172,61 @@ class CatanGame {
 
     // ── Cities & Knights globals (unused unless this.citiesKnights) ─
     this.barbarianProgress = 0; // 0..7, resets after each attack
-    this.metropolises = { trade: null, politics: null, science: null }; // playerId or null
+    this.metropolises = { trade: null, politics: null, science: null }; // { playerId, vertexId } or null, per track
     this.pendingKnightDisplace = null; // { targetVertexId, playerId, options } while player picks the retreat spot
+    this.eventDie = null; // 'ships'|'trade'|'politics'|'science' — last event die roll
+    this.pendingBarbarianChoices = []; // [{ playerId, options }] queue of cities-to-downgrade choices after a lost attack
+    this.pendingMetropolisChoice = null; // { playerId, track, options } while player picks which city becomes the metropolis
+
+    // Cities & Knights: progress card decks (one draw pile + one discard
+    // pile per color), the pending hand-limit-discard queue, and whether
+    // the robber has ever moved yet (it can't move — via 7, knight, or
+    // Bishop — until after the first barbarian attack resolves).
+    this.progressDecks = this.citiesKnights ? {
+      trade: this._generateProgressDeck('trade'),
+      politics: this._generateProgressDeck('politics'),
+      science: this._generateProgressDeck('science')
+    } : { trade: [], politics: [], science: [] };
+    this.progressDiscards = { trade: [], politics: [], science: [] };
+    this.pendingProgressDiscard = []; // [playerId, ...] who must discard down to the hand limit
+    this.firstBarbarianAttackHappened = false;
+    this.lastDrawnProgressCards = []; // [{ playerId, type, color, seq }] — draw notifications for the current roll (several players can draw on one roll)
+    this.progressDrawSeq = 0; // monotonic id so clients can tell which notifications they have already shown
+    this.pendingDefenderCardChoice = []; // [playerId, ...] tied top defenders who must each pick a progress-card color (official tie rule: no Defender VP)
+
+    // Debug: auto-place everyone's initial settlements/roads with valid
+    // random placements, then jump straight into the main phase — reuses
+    // the exact same placement/resource-distribution code paths as real
+    // setup, just driven by the server instead of clicks.
+    if (this.debugSkipSetup) this._debugAutoSetup();
+  }
+
+  _debugAutoSetup() {
+    let guard = 0; // safety net against an infinite loop on a pathological board
+    while (this.phase !== 'main' && guard++ < 500) {
+      if (!this.waitingForRoad) {
+        const candidates = this.board.vertices.filter(v => this._isValidSettlementPlacement(v.id, null));
+        if (!candidates.length) break;
+        const v = candidates[Math.floor(Math.random() * candidates.length)];
+        this.placeInitialSettlement(v.id);
+      } else {
+        const vertex = this.board.vertices[this.lastSettlementPlaced];
+        const candidates = vertex.adjEdges.filter(eid => this.board.edges[eid].owner === null);
+        if (!candidates.length) break;
+        const eid = candidates[Math.floor(Math.random() * candidates.length)];
+        this.placeInitialRoad(eid);
+        this.setupEndTurn();
+      }
+    }
+  }
+
+  // Cities & Knights: build one color's shuffled progress-card draw pile
+  _generateProgressDeck(color) {
+    const deck = [];
+    for (const [type, count] of Object.entries(PROGRESS_CARD_COUNTS[color])) {
+      for (let i = 0; i < count; i++) deck.push(type);
+    }
+    return this._shuffle(deck);
   }
 
   // ================================================================
@@ -634,6 +709,7 @@ class CatanGame {
 
   rollDice() {
     this.lastDrawnCard = null; // clear previous drawn-card notification
+    this.lastDrawnProgressCards = []; // clear previous roll's progress-draw notifications
     if (this.phase !== 'main') return { error: 'Not in main phase' };
     if (this.diceRolled) return { error: 'Already rolled' };
 
@@ -655,6 +731,32 @@ class CatanGame {
 
     this._log('log_roll', {name: this.currentPlayer.name, d1, d2, total});
 
+    // Cities & Knights: third "event" die — 3 ship faces + 1 each of
+    // trade/politics/science. A ship advances the barbarian fleet; the
+    // other 3 faces let players draw a progress card of that color.
+    let barbarianAttack = null;
+    if (this.citiesKnights) {
+      const eventRoll = Math.floor(Math.random() * 6) + 1;
+      this.eventDie = eventRoll <= 3 ? 'ships' : (eventRoll === 4 ? 'trade' : eventRoll === 5 ? 'politics' : 'science');
+      if (this.eventDie === 'ships') {
+        this.barbarianProgress++;
+        this._log('log_barbarian_advance', { progress: this.barbarianProgress });
+        if (this.barbarianProgress >= 7) {
+          barbarianAttack = this._resolveBarbarianAttack();
+        }
+      } else {
+        // Every player with at least level 1 on that track rolls a red die;
+        // rolling AT OR UNDER their level draws a progress card of that color.
+        const color = this.eventDie;
+        for (const p of this.players) {
+          const level = p.cityImprovements[color] || 0;
+          if (level < 1) continue;
+          const redDie = Math.floor(Math.random() * 6) + 1;
+          if (redDie <= level) this._drawProgressCard(p, color);
+        }
+      }
+    }
+
     if (total === 7) {
       // Anyone with >7 cards must discard half (rounded down) before the robber moves
       this.pendingDiscard = this.players
@@ -662,13 +764,184 @@ class CatanGame {
         .map(p => p.id);
 
       if (this.pendingDiscard.length === 0) {
-        this.pendingRobber = true; // nobody discards → move robber immediately
+        // Cities & Knights: the robber (via 7, knight, or Bishop) cannot
+        // move until after the first barbarian attack has resolved
+        if (!this.citiesKnights || this.firstBarbarianAttackHappened) {
+          this.pendingRobber = true;
+        }
       }
     } else {
       this._distributeResources(total);
     }
 
-    return { ok: true, dice: [d1, d2], total };
+    return { ok: true, dice: [d1, d2], total, eventDie: this.eventDie, barbarianAttack };
+  }
+
+  // Cities & Knights: draw one progress card of the given color for a
+  // player. VP cards (Constitution/Printer) resolve immediately and never
+  // enter the hand; everything else is added to their hand, which may then
+  // require them to discard down to the 4-card limit.
+  _drawProgressCard(player, color) {
+    if (this.progressDecks[color].length === 0) {
+      if (this.progressDiscards[color].length === 0) return; // deck truly exhausted
+      this.progressDecks[color] = this._shuffle(this.progressDiscards[color]);
+      this.progressDiscards[color] = [];
+    }
+    const type = this.progressDecks[color].pop();
+
+    if (VP_PROGRESS_CARDS.has(type)) {
+      player.points += 1;
+      this.progressDiscards[color].push(type);
+      this._log('log_progress_vp', { name: player.name, type });
+      this._checkWin(player);
+    } else {
+      player.progressCards.push({ type, color });
+      if (player.progressCards.length > PROGRESS_HAND_LIMIT && !this.pendingProgressDiscard.includes(player.id)) {
+        this.pendingProgressDiscard.push(player.id);
+      }
+      // NOTE: the card TYPE is secret — the public log only records the color
+      this._log('log_progress_drawn', { name: player.name, color });
+    }
+    this.lastDrawnProgressCards.push({ playerId: player.id, type, color, seq: ++this.progressDrawSeq });
+  }
+
+  // Cities & Knights: discard down to the 4-card progress-card hand limit
+  discardProgressCards(playerId, indices) {
+    if (!this.pendingProgressDiscard.includes(playerId)) return { error: 'No progress-card discard pending' };
+    const player = this.players[playerId];
+    const uniqueIdx = [...new Set(indices)];
+    if (player.progressCards.length - uniqueIdx.length !== PROGRESS_HAND_LIMIT) {
+      return { error: `Must discard down to exactly ${PROGRESS_HAND_LIMIT} cards` };
+    }
+    for (const idx of uniqueIdx) {
+      if (!player.progressCards[idx]) return { error: 'Invalid card index' };
+    }
+    // Remove highest indices first so earlier ones stay valid while splicing
+    for (const idx of uniqueIdx.sort((a, b) => b - a)) {
+      const card = player.progressCards[idx];
+      this.progressDiscards[card.color].push(card.type);
+      player.progressCards.splice(idx, 1);
+    }
+    this.pendingProgressDiscard = this.pendingProgressDiscard.filter(id => id !== playerId);
+    return { ok: true };
+  }
+
+  // Cities & Knights: a tied top defender picks which color progress card
+  // to draw (official rule when the Defender of Catan award is tied)
+  chooseDefenderProgressCard(playerId, color) {
+    if (!this.pendingDefenderCardChoice.includes(playerId)) return { error: 'No defender card choice pending' };
+    if (!['trade', 'politics', 'science'].includes(color)) return { error: 'Invalid color' };
+    this._drawProgressCard(this.players[playerId], color);
+    this.pendingDefenderCardChoice = this.pendingDefenderCardChoice.filter(id => id !== playerId);
+    return { ok: true };
+  }
+
+  // Unbiased Fisher-Yates shuffle (in place, also returns the array)
+  _shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  // ── Cities & Knights: resolve a barbarian attack once the fleet reaches
+  // Catan. Defense = total strength of ACTIVE knights across all players;
+  // attack = total city count across all players (metropolises count as a
+  // normal city for attack strength, but cannot be the one downgraded).
+  // Every active knight (any player) becomes inactive afterwards regardless
+  // of the outcome, and the barbarian track resets to 0. ──
+  _resolveBarbarianAttack() {
+    this.firstBarbarianAttackHappened = true;
+    const KS = CatanGame.KNIGHT_STRENGTH;
+    const defenseByPlayer = {};
+    let totalDefense = 0;
+    for (const p of this.players) {
+      let s = 0;
+      for (const k of p.knights) if (k.active) s += KS[k.rank];
+      defenseByPlayer[p.id] = s;
+      totalDefense += s;
+    }
+    let totalAttack = 0;
+    for (const p of this.players) totalAttack += p.cities.length;
+
+    const won = totalDefense >= totalAttack;
+    const result = { totalDefense, totalAttack, won, defenders: [], citiesLost: [] };
+
+    if (won) {
+      const maxDef = Math.max(...this.players.map(p => defenseByPlayer[p.id]));
+      if (maxDef > 0) {
+        const top = this.players.filter(p => defenseByPlayer[p.id] === maxDef);
+        if (top.length === 1) {
+          const p = top[0];
+          p.defenderPoints = (p.defenderPoints || 0) + 1;
+          p.points += 1;
+          result.defenders.push(p.id);
+          this._log('log_defender_of_catan', { name: p.name });
+          this._checkWin(p);
+        } else {
+          // Official tie rule: nobody gets the Defender VP; each tied player
+          // instead draws a progress card of a color of their choice
+          for (const p of top) {
+            this.pendingDefenderCardChoice.push(p.id);
+            result.defenders.push(p.id);
+            this._log('log_defender_tie', { name: p.name });
+          }
+        }
+      }
+    } else {
+      // Among players who own at least one non-metropolis city, whoever
+      // contributed the LEAST active defense loses one city (their choice
+      // if they have more than one eligible city).
+      const eligible = this.players.filter(p => p.cities.some(v => !this._isMetropolisVertex(v)));
+      if (eligible.length > 0) {
+        const minDef = Math.min(...eligible.map(p => defenseByPlayer[p.id]));
+        const losers = eligible.filter(p => defenseByPlayer[p.id] === minDef);
+        for (const p of losers) {
+          const candidates = p.cities.filter(v => !this._isMetropolisVertex(v));
+          if (candidates.length === 1) {
+            this._downgradeCity(p, candidates[0]);
+            result.citiesLost.push({ playerId: p.id, vertexId: candidates[0] });
+          } else if (candidates.length > 1) {
+            this.pendingBarbarianChoices.push({ playerId: p.id, options: candidates });
+          }
+        }
+      }
+      this._log('log_barbarian_win', {});
+    }
+
+    // Every active knight, any player, deactivates after the attack resolves
+    for (const p of this.players) for (const k of p.knights) k.active = false;
+
+    this.barbarianProgress = 0;
+    return result;
+  }
+
+  // Cities & Knights: is this vertex currently a metropolis (any track)?
+  _isMetropolisVertex(vertexId) {
+    return Object.values(this.metropolises).some(m => m && m.vertexId === vertexId);
+  }
+
+  // Cities & Knights: turn a city back into a settlement (barbarian loss)
+  _downgradeCity(player, vertexId) {
+    const idx = player.cities.indexOf(vertexId);
+    if (idx === -1) return;
+    player.cities.splice(idx, 1);
+    player.settlements.push(vertexId);
+    this.board.vertices[vertexId].building = 'settlement';
+    player.points -= 1; // city (2pt) reverts to settlement (1pt)
+    this._log('log_city_downgraded', { name: player.name });
+  }
+
+  // Cities & Knights: pick which of several eligible cities to downgrade
+  // after losing a barbarian attack (queued if several players need to choose)
+  resolveBarbarianCityChoice(vertexId) {
+    if (!this.pendingBarbarianChoices.length) return { error: 'No pending choice' };
+    const current = this.pendingBarbarianChoices[0];
+    if (!current.options.includes(vertexId)) return { error: 'Invalid city' };
+    this._downgradeCity(this.players[current.playerId], vertexId);
+    this.pendingBarbarianChoices.shift();
+    return { ok: true, remaining: this.pendingBarbarianChoices.length };
   }
 
   // Give resources to every player with a settlement/city on a hex matching `number`
@@ -713,8 +986,10 @@ class CatanGame {
 
     this.pendingDiscard = this.pendingDiscard.filter(id => id !== playerId);
 
-    // Once everyone has discarded, the current player moves the robber
-    if (this.pendingDiscard.length === 0) {
+    // Once everyone has discarded, the current player moves the robber —
+    // unless C&K is on and the barbarians haven't attacked yet (the robber
+    // is frozen until then)
+    if (this.pendingDiscard.length === 0 && (!this.citiesKnights || this.firstBarbarianAttackHappened)) {
       this.pendingRobber = true;
     }
 
@@ -843,6 +1118,8 @@ class CatanGame {
   }
 
   buyDevCard() {
+    // Official Cities & Knights replaces development cards with progress cards
+    if (this.citiesKnights) return { error: 'No development cards in Cities & Knights' };
     if (!this.diceRolled) return { error: 'Roll dice first' };
     const player = this.currentPlayer;
 
@@ -868,10 +1145,11 @@ class CatanGame {
   }
 
   // ── Cities & Knights: buy the next level of a city-improvement track ──
-  // Cost = nextLevel commodities of the track's color; level is capped at
-  // the player's city count; the metropolis on a track is founded by the
-  // first player to reach level 4, and seized by anyone who later reaches
-  // a strictly higher level than the current holder (i.e. level 5).
+  // Cost = nextLevel commodities of the track's color; the metropolis on a
+  // track is founded by the first player to reach level 4, and seized by
+  // anyone who later reaches a strictly higher level than the current
+  // holder (i.e. level 5). Founding/seizing requires an available city
+  // (one that is not already a metropolis).
   buyCityImprovement(track) {
     if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
     if (!this.diceRolled) return { error: 'Roll dice first' };
@@ -882,7 +1160,18 @@ class CatanGame {
     if (currentLevel >= 5) return { error: 'Track already at maximum level' };
 
     const nextLevel = currentLevel + 1;
-    if (nextLevel > player.cities.length) return { error: 'Not enough cities for this level' };
+
+    // Official rules: levels 1-3 only cost commodities (no city requirement).
+    // A city that is not already a metropolis ("available city") is required
+    // to buy level 4, and to seize the metropolis at level 5 — because the
+    // metropolis piece needs a city to be placed on.
+    const holder = this.metropolises[track]; // { playerId, vertexId } | null
+    const holderLevel = holder !== null ? this.players[holder.playerId].cityImprovements[track] : 0;
+    const grantsMetropolis = (holder === null || holder.playerId !== player.id) && nextLevel > holderLevel;
+    const availableCities = player.cities.filter(v => !this._isMetropolisVertex(v));
+    if (nextLevel >= 4 && grantsMetropolis && availableCities.length === 0) {
+      return { error: 'You need a city that is not already a metropolis' };
+    }
 
     const commodity = TRACK_COMMODITY[track];
     const cost = nextLevel;
@@ -892,17 +1181,20 @@ class CatanGame {
     player.cityImprovements[track] = nextLevel;
     this._log('log_city_improvement', { name: player.name, track, level: nextLevel });
 
-    if (nextLevel >= 4) {
-      const holder = this.metropolises[track];
-      const holderLevel = holder !== null ? this.players[holder].cityImprovements[track] : 0;
-      if (holder !== player.id && nextLevel > holderLevel) {
-        if (holder !== null) {
-          this.players[holder].points -= 2;
-          this._log('log_metropolis_lost', { name: this.players[holder].name, track });
-        }
-        this.metropolises[track] = player.id;
+    if (nextLevel >= 4 && grantsMetropolis) {
+      if (holder !== null) {
+        this.players[holder.playerId].points -= 2;
+        this._log('log_metropolis_lost', { name: this.players[holder.playerId].name, track });
+      }
+      if (availableCities.length === 1) {
+        // Only one eligible city — nothing to actually choose between
+        this.metropolises[track] = { playerId: player.id, vertexId: availableCities[0] };
         player.points += 2;
         this._log('log_metropolis_founded', { name: player.name, track });
+      } else {
+        // Let the player pick which eligible city becomes the metropolis;
+        // points/assignment happen once resolveMetropolisChoice() is called.
+        this.pendingMetropolisChoice = { playerId: player.id, track, options: availableCities };
       }
     }
 
@@ -1025,6 +1317,7 @@ class CatanGame {
   chaseRobberWithKnight(vertexId, newHexId) {
     if (!this.citiesKnights) return { error: 'Cities & Knights variant is not enabled' };
     if (!this.diceRolled) return { error: 'Roll dice first' };
+    if (!this.firstBarbarianAttackHappened) return { error: 'The robber cannot move until after the first barbarian attack' };
     const player = this.currentPlayer;
     const knight = player.knights.find(k => k.vertexId === vertexId);
     if (!knight) return { error: 'No knight of yours on that vertex' };
@@ -1128,7 +1421,26 @@ class CatanGame {
     return { ok: true };
   }
 
+  // Cities & Knights: finalize which city becomes the metropolis, once the
+  // player has more than one and had to choose (see buyCityImprovement)
+  resolveMetropolisChoice(vertexId) {
+    if (!this.pendingMetropolisChoice) return { error: 'No metropolis choice pending' };
+    const { playerId, track, options } = this.pendingMetropolisChoice;
+    if (!options.includes(vertexId)) return { error: 'Invalid city' };
+    const player = this.players[playerId];
+    this.metropolises[track] = { playerId, vertexId };
+    player.points += 2;
+    this._log('log_metropolis_founded', { name: player.name, track });
+    this.pendingMetropolisChoice = null;
+    this._checkWin(player);
+    return { ok: true };
+  }
+
   playDevCard(cardType, params = {}) {
+    // Official Cities & Knights has no development cards (also closes the
+    // loophole where a base-game Knight card could move the robber before
+    // the first barbarian attack)
+    if (this.citiesKnights) return { error: 'No development cards in Cities & Knights' };
     // Knight is the only card playable before rolling dice
     if (!this.diceRolled && cardType !== 'knight') return { error: 'Roll dice first (except knight)' };
     const player = this.currentPlayer;
@@ -1250,11 +1562,15 @@ class CatanGame {
 
   endTurn() {
     this.lastDrawnCard = null;
+    this.lastDrawnProgressCards = [];
     if (!this.diceRolled && this.phase === 'main') return { error: 'Roll dice first' };
     if (this.pendingRobber || this.pendingSteal) return { error: 'Resolve robber first' };
-    if (this.pendingTrade) return { error: 'Resolve pending trade first' };
     if (this.pendingDiscard.length > 0) return { error: 'Players must discard first' };
     if (this.pendingKnightDisplace) return { error: 'Resolve knight displacement first' };
+    if (this.pendingBarbarianChoices.length > 0) return { error: 'Resolve barbarian city loss first' };
+    if (this.pendingMetropolisChoice) return { error: 'Choose your metropolis city first' };
+    if (this.pendingProgressDiscard.length > 0) return { error: 'Discard down to the progress-card hand limit first' };
+    if (this.pendingDefenderCardChoice.length > 0) return { error: 'Tied defenders must pick their progress card first' };
 
     // Mark all cards bought this turn as playable next turn
     for (const card of this.currentPlayer.devCards) {
@@ -1465,6 +1781,7 @@ class CatanGame {
   // Badge transfers when a player strictly exceeds the current holder's
   // knight count and has at least 3 knights played.
   _updateLargestArmy() {
+    if (this.citiesKnights) return; // no Largest Army in official C&K
     const player = this.currentPlayer;
     if (player.knightsPlayed >= 3 && player.knightsPlayed > this.largestArmySize) {
       if (this.largestArmyOwner !== null && this.largestArmyOwner !== player.id) {
@@ -1542,13 +1859,26 @@ class CatanGame {
       debugDevCard:   this.debugDevCard  || null,
       winPoints:      this.winPoints || 10,
       debugResources: this.debugResources || false,
+      debugSkipSetup: this.debugSkipSetup || false,
       debugForceDice: this.debugForceDice || null,
       hiddenResources: this.hiddenResources || false,
       balancedResources: this.balancedResources || false,
       citiesKnights: this.citiesKnights || false,
       barbarianProgress: this.barbarianProgress || 0,
       metropolises: this.metropolises || { trade: null, politics: null, science: null },
-      pendingKnightDisplace: this.pendingKnightDisplace || null
+      pendingKnightDisplace: this.pendingKnightDisplace || null,
+      eventDie: this.eventDie || null,
+      pendingBarbarianChoices: this.pendingBarbarianChoices || [],
+      pendingMetropolisChoice: this.pendingMetropolisChoice || null,
+      progressDeckCounts: {
+        trade: this.progressDecks?.trade?.length || 0,
+        politics: this.progressDecks?.politics?.length || 0,
+        science: this.progressDecks?.science?.length || 0
+      },
+      pendingProgressDiscard: this.pendingProgressDiscard || [],
+      firstBarbarianAttackHappened: this.firstBarbarianAttackHappened || false,
+      lastDrawnProgressCards: this.lastDrawnProgressCards || [],
+      pendingDefenderCardChoice: this.pendingDefenderCardChoice || []
     };
   }
 
@@ -1592,6 +1922,16 @@ class CatanGame {
       barbarianProgress:  this.barbarianProgress,
       metropolises:       this.metropolises,
       pendingKnightDisplace: this.pendingKnightDisplace,
+      eventDie:           this.eventDie,
+      pendingBarbarianChoices: this.pendingBarbarianChoices,
+      pendingMetropolisChoice: this.pendingMetropolisChoice,
+      progressDecks: this.progressDecks,
+      progressDiscards: this.progressDiscards,
+      pendingProgressDiscard: this.pendingProgressDiscard,
+      firstBarbarianAttackHappened: this.firstBarbarianAttackHappened,
+      lastDrawnProgressCards: this.lastDrawnProgressCards,
+      progressDrawSeq: this.progressDrawSeq,
+      pendingDefenderCardChoice: this.pendingDefenderCardChoice,
     }));
   }
 
@@ -1628,6 +1968,16 @@ class CatanGame {
     this.barbarianProgress   = s.barbarianProgress || 0;
     this.metropolises        = s.metropolises || { trade: null, politics: null, science: null };
     this.pendingKnightDisplace = s.pendingKnightDisplace || null;
+    this.eventDie             = s.eventDie || null;
+    this.pendingBarbarianChoices = s.pendingBarbarianChoices || [];
+    this.pendingMetropolisChoice = s.pendingMetropolisChoice || null;
+    this.progressDecks = s.progressDecks || { trade: [], politics: [], science: [] };
+    this.progressDiscards = s.progressDiscards || { trade: [], politics: [], science: [] };
+    this.pendingProgressDiscard = s.pendingProgressDiscard || [];
+    this.firstBarbarianAttackHappened = s.firstBarbarianAttackHappened || false;
+    this.lastDrawnProgressCards = s.lastDrawnProgressCards || [];
+    this.progressDrawSeq = s.progressDrawSeq || 0;
+    this.pendingDefenderCardChoice = s.pendingDefenderCardChoice || [];
     this.pendingSteal        = s.pendingSteal;
     this.robberCandidates    = s.robberCandidates;
     this.pendingRoadBuilding = s.pendingRoadBuilding;

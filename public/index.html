@@ -84,6 +84,7 @@
         </div>
         <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:8px">
           <button class="rule-btn" id="dbg-res" onclick="toggleDebugRes()">💰 10 risorse iniziali</button>
+          <button class="rule-btn" id="dbg-skip-setup" onclick="toggleDebugSkipSetup()">🚀 Salta Setup</button>
           <select id="dbg-dice" onchange="setDebugDice(this.value)" style="background:#1a1200;color:#f0c040;border:1.5px solid rgba(200,164,74,.4);border-radius:8px;padding:6px 10px;cursor:pointer">
             <option value="">🎲 Dado libero</option>
             <option value="2">🎲 Forza 2</option>
@@ -166,7 +167,9 @@
       <div id="dice-display">
         <span id="die1" class="die">?</span>
         <span id="die2" class="die">?</span>
+        <span id="die3" class="die ck-only hidden" data-tip="Dado evento"></span>
       </div>
+      <div id="barbarian-track" class="ck-only hidden" data-tip="Avanzata barbara"></div>
       <div id="phase-actions">
         <button id="btn-roll"     class="action-btn green"      data-t="roll_dice">🎲 Roll Dice</button>
         <button id="btn-end-turn" class="action-btn orange"     data-t="end_turn">▶ End Turn</button>
@@ -219,6 +222,8 @@
 
     <!-- Banners -->
     <div id="robber-banner" class="banner hidden" data-t="banner_robber" data-skin-label="robber">🦹 Move the robber! Tap a hex.</div>
+    <div id="barbarian-choice-banner" class="banner hidden">🏹 Choose which city to lose. Tap a city.</div>
+    <div id="metropolis-choice-banner" class="banner hidden">🏛️ Choose which city becomes the Metropolis. Tap a city.</div>
     <div id="setup-banner" class="banner hidden"></div>
 
     <!-- Dice overlay -->
@@ -299,6 +304,35 @@
       <div class="modal-actions">
         <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <div id="modal-progress-hand" class="modal">
+    <div class="modal-content">
+      <h2>📗 <span id="progress-hand-title">Carte Progresso</span></h2>
+      <div id="progress-hand-list" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+      <div class="modal-actions">
+        <button class="big-btn" onclick="closeAllModals()" data-t="cancel_btn">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-progress-discard" class="modal">
+    <div class="modal-content">
+      <h2>📗 <span id="progress-discard-title">Scarta carte progresso</span></h2>
+      <div id="progress-discard-info" style="margin:6px 0;color:#c8b080;font-size:.85rem"></div>
+      <div id="progress-discard-list" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
+      <div class="modal-actions">
+        <button id="btn-progress-discard-confirm" class="big-btn" data-t="confirm_btn">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-defender-choice" class="modal">
+    <div class="modal-content">
+      <h2><span id="defender-choice-title">🛡️</span></h2>
+      <div style="margin:6px 0;color:#c8b080;font-size:.85rem" data-t="ck_defender_tie_prompt">Tie for Defender of Catan — pick a progress card color:</div>
+      <div id="defender-choice-list" style="display:flex;flex-direction:column;gap:8px;margin-top:8px"></div>
     </div>
   </div>
 

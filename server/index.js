@@ -348,6 +348,7 @@ function handle(msg, ws) {
         skinId:            msg.skinId || 'standard',
         debugDevCard:      msg.debugDevCard || null,
         debugResources:    !!msg.debugResources,
+        debugSkipSetup:    !!msg.debugSkipSetup,
         debugForceDice:    msg.debugForceDice || null,
         quickGame:         !!msg.quickGame,
         unlimitedDev:      msg.unlimitedDev !== false, // default ON
@@ -401,6 +402,17 @@ function handle(msg, ws) {
       if (room?.game) { pushUndo(room); room.game.displaceKnight(msg.fromVertexId, msg.targetVertexId); broadcastState(pin); } break;
     case 'RESOLVE_KNIGHT_DISPLACE':
       if (room?.game) { pushUndo(room); room.game.resolveKnightDisplace(msg.vertexId); broadcastState(pin); } break;
+    case 'RESOLVE_BARBARIAN_CITY_CHOICE':
+      if (room?.game) { pushUndo(room); room.game.resolveBarbarianCityChoice(msg.vertexId); broadcastState(pin); } break;
+    case 'RESOLVE_METROPOLIS_CHOICE':
+      if (room?.game) { pushUndo(room); room.game.resolveMetropolisChoice(msg.vertexId); broadcastState(pin); } break;
+    // Like DISCARD_RESOURCES: no undo — the discard is another player's
+    // hidden-hand choice, the current player must not be able to roll it back
+    case 'DISCARD_PROGRESS_CARDS':
+      if (room?.game) { room.game.discardProgressCards(msg.playerId, msg.indices); broadcastState(pin); } break;
+    // Tied Defender of Catan: each tied player picks a progress-card color (no undo, same reasoning)
+    case 'CHOOSE_DEFENDER_PROGRESS':
+      if (room?.game) { room.game.chooseDefenderProgressCard(msg.playerId, msg.color); broadcastState(pin); } break;
     case 'PLAY_DEV_CARD':
       if (room?.game) { pushUndo(room); room.game.playDevCard(msg.cardType, msg.params); broadcastState(pin); } break;
     case 'TRADE_BANK':
