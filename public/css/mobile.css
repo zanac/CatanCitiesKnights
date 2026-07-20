@@ -261,6 +261,15 @@ html, body {
 }
 .mob-target-btn.active { border-color:var(--pcol,#c8a44a); background:rgba(255,255,255,.12); }
 
+.mob-city-choice-list { display:flex; flex-direction:column; gap:10px; margin-top:12px; }
+.mob-city-choice-btn {
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  padding:14px; border-radius:12px;
+  background:rgba(220,60,60,.12); border:2px solid rgba(220,60,60,.5);
+  color:#f0e6c8; font-size:1rem; font-family:'Georgia',serif; cursor:pointer;
+}
+.mob-city-choice-btn:active { background:rgba(220,60,60,.25); }
+
 .mob-error { background:rgba(200,50,50,.2); border:1px solid #aa3333;
   border-radius:8px; padding:7px 10px; color:#ff8080; font-size:.82rem; margin-top:7px; }
 .mob-error.hidden { display:none; }

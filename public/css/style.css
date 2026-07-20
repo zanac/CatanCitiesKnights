@@ -1625,6 +1625,14 @@ body.ui-xlarge .medal-badge, body.ui-xlarge .knight-count { font-size: 1.3rem; p
 .ck-track-footer .dev-card-btn { padding: 6px 12px; font-size: .82rem; }
 .ck-reason { font-size: .72rem; color: #999; }
 
+#die3 { font-size: 1.6rem; background: #2a2438; color: #f0e6c8; }
+#barbarian-track {
+  display: flex; align-items: center;
+  background: rgba(20,16,10,.6); border: 1.5px solid rgba(200,164,74,.4);
+  border-radius: 10px; padding: 6px 12px; font-size: .95rem; color: #f0e6c8;
+  font-weight: bold;
+}
+
 /* ================================================================
    MODERN HOVER TOOLTIPS (replaces native title= for icon labels)
    Elements carry data-tip="text"; #hover-tooltip is a single
