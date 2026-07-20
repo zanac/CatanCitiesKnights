@@ -1896,6 +1896,15 @@ function checkModals() {
     }
   }
   if (state.pendingSteal&&state.robberCandidates?.length>1&&amCurrentPlayer) { showStealModal(); return; }
+  // Cities & Knights: keep the improvements modal in sync with the server —
+  // it stays open across purchases so the player can chain levels, and it is
+  // re-rendered here on every broadcast (never optimistically from local
+  // state). If the purchase just triggered a metropolis-city choice, close
+  // it instead so the board highlight/banner is visible.
+  if (document.getElementById('modal-city-improvements')?.classList.contains('open')) {
+    if (state.pendingMetropolisChoice) closeAllModals();
+    else openCityImprovementsModal();
+  }
   // Cities & Knights: progress-card hand-limit discard (same visibility rule as resource discard)
   if (state.pendingProgressDiscard?.length > 0) {
     const myProgDiscard = WEB_PLAYER_ID === null
@@ -2389,15 +2398,23 @@ function openCityImprovementsModal() {
     const maxed = level >= 5;
     const nextLevel = level + 1;
     const cost = nextLevel;
-    const overCityCap = nextLevel > (p.cities?.length || 0);
+    // Official rule: no city-count cap on levels. An "available city" (one
+    // that is not already a metropolis) is required only when this purchase
+    // would found or seize the metropolis — mirror of the server check.
+    const holder = state.metropolises?.[tr.id] || null;
+    const holderLevel = holder ? (state.players[holder.playerId]?.cityImprovements?.[tr.id] || 0) : 0;
+    const grantsMetro = (!holder || holder.playerId !== p.id) && nextLevel > holderLevel;
+    const metroVertices = new Set(Object.values(state.metropolises||{}).filter(Boolean).map(m => m.vertexId));
+    const hasAvailableCity = (p.cities||[]).some(v => !metroVertices.has(v));
+    const needsCity = nextLevel >= 4 && grantsMetro && !hasAvailableCity;
     const cantAfford = have < cost;
-    const disabled = maxed || overCityCap || cantAfford;
-    const holdsMetro = state.metropolises?.[tr.id]?.playerId === p.id;
+    const disabled = maxed || needsCity || cantAfford;
+    const holdsMetro = holder?.playerId === p.id;
     const dots = Array.from({length:5}, (_,i)=>`<span class="ck-dot${i<level?' filled':''}"></span>`).join('');
     const trackName = skinLabel(`ck_track_${tr.id}`, t(`ck_track_${tr.id}`) || tr.id);
     let reason = '';
     if (maxed) reason = t('ck_maxed') || 'MAX';
-    else if (overCityCap) reason = t('ck_need_city') || 'Serve una città in più';
+    else if (needsCity) reason = t('ck_need_city') || 'Serve una città non-metropoli';
     else if (cantAfford) reason = `${CK_COMMODITY_ICON[tr.commodity]} ${cost-have} ${t('ck_missing')||'mancanti'}`;
     return `
       <div class="ck-track-row">
@@ -2420,17 +2437,9 @@ function openCityImprovementsModal() {
 }
 window.buyCityImprovement = track => {
   send({ type: 'BUY_CITY_IMPROVEMENT', track });
-  // Keep the modal open and refresh it so the player can buy the next
-  // level right away without reopening (server broadcast lands async,
-  // so we optimistically re-render from current local state on the next tick).
-  // Exception: if that purchase just triggered a metropolis-city choice,
-  // close the modal instead so the board highlight/banner is visible.
-  setTimeout(() => {
-    if (state.pendingMetropolisChoice) { closeAllModals(); return; }
-    if (document.getElementById('modal-city-improvements').classList.contains('open')) {
-      openCityImprovementsModal();
-    }
-  }, 150);
+  // The modal is refreshed by the state-update handler when the server
+  // broadcast lands (re-rendering immediately from local state showed
+  // stale dots: the display lagged one purchase behind).
 };
 
 // ===================================================================
