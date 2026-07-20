@@ -213,7 +213,8 @@ let panStart     = null; // {x, y, camTx, camTy}
 let lastTapTime  = 0;
 
 // ── Build mode ────────────────────────────────────────────────────
-let mobBuildMode = null; // 'road'|'settlement'|'city'|'robber'|null
+let mobBuildMode = null; // 'road'|'settlement'|'city'|'robber'|'knight'|'knight_move_target'|'knight_chase_target'|'knight_displace_target'|null
+let knightActionFrom = null; // vertexId of the knight performing move/chase/displace, while targeting
 
 // ── WebSocket ─────────────────────────────────────────────────────
 let ws;
@@ -796,6 +797,22 @@ function render(prevRolled) {
     return;
   }
 
+  // ── Cities & Knights: knight-displacement retreat choice required from
+  //    ME (the player whose knight was displaced), even if it's not my turn —
+  //    resolved by tapping the highlighted vertex on the board (see
+  //    handleBoardTap), not through a modal.
+  const myKnightDisplace = state.citiesKnights && state.pendingKnightDisplace?.playerId === MY_PLAYER_ID;
+  if (myKnightDisplace) {
+    showScreen('screen-active');
+    hideWaitOverlay();
+    renderTopBar(curIdx);
+    const banner=document.getElementById('mob-build-banner');
+    banner.textContent = t('mob_build_label_knight_retreat') || 'Tocca dove ritirare il tuo cavaliere';
+    banner.classList.remove('hidden');
+    renderBoardCanvas();
+    return;
+  }
+
   // ── Cities & Knights: barbarian city-loss choice required from ME,
   //    even if it's not my turn (the attack can happen on anyone's roll) ──
   const myBarbarianChoice = state.citiesKnights && state.pendingBarbarianChoices?.length > 0 &&
@@ -837,6 +854,16 @@ function render(prevRolled) {
   } else {
     const modal = document.getElementById('mob-modal-defender-choice');
     if (modal.classList.contains('open')) closeMobModal('mob-modal-defender-choice');
+  }
+
+  // Cities & Knights: keep the knights/improvements modals in sync with the
+  // server on every broadcast (never optimistically from local state — the
+  // improvements dots were lagging one purchase behind before this fix).
+  if (document.getElementById('mob-modal-knights')?.classList.contains('open')) {
+    renderMobKnightsList();
+  }
+  if (document.getElementById('mob-modal-improvements')?.classList.contains('open')) {
+    renderMobImprovementsList();
   }
 
   if (!isMyTurn) { renderWaitScreen(curIdx); return; }
@@ -1222,6 +1249,9 @@ function updateBuildButtons() {
   // Knight can be played before dice; other cards need dice rolled
   const canPlayNow = ca || (state.phase==='main' && !state.pendingRobber && hasKnight && !state.diceRolled);
   const hasPlayable= state.diceRolled ? hasDev : hasKnight;
+  // Official C&K has no development cards: hide this button entirely for now
+  // (it becomes the progress-card play button once that's implemented)
+  document.getElementById('mob-btn-play-dev').style.display = state.citiesKnights ? 'none' : '';
   setBB('mob-btn-play-dev', hasPlayable, canPlayNow);
   // Visual hint: knight available pre-roll
   const devBtn = document.getElementById('mob-btn-play-dev');
@@ -1230,11 +1260,26 @@ function updateBuildButtons() {
   } else {
     devBtn.classList.remove('knight-ready');
   }
+
+  // ── Cities & Knights: knight recruitment + city improvements ──
+  document.querySelectorAll('.mob-ck-only').forEach(el => el.classList.toggle('hidden', !state.citiesKnights));
+  if (state.citiesKnights) {
+    const hasKnightRes = res.sheep>=1 && res.ore>=1;
+    const basicKnights = (me.knights||[]).filter(k=>k.rank==='basic').length;
+    setBB('mob-btn-knight', hasKnightRes && basicKnights<2, ca);
+    const commodities = me.commodities || {};
+    const hasAnyCommodity = (commodities.paper||0)>0 || (commodities.cloth||0)>0 || (commodities.coin||0)>0;
+    const hasCity = (me.cities?.length||0) > 0;
+    setBB('mob-btn-improve', hasCity && hasAnyCommodity, ca);
+  }
+
   // Keep active-mode highlight
   ['road','settlement','city'].forEach(m=>{
     document.getElementById(`mob-btn-${m}`)
       .classList.toggle('active-mode', mobBuildMode===m||mobBuildMode===m+'_initial');
   });
+  document.getElementById('mob-btn-knight')?.classList.toggle('active-mode',
+    ['knight','knight_move_target','knight_chase_target','knight_displace_target'].includes(mobBuildMode));
 }
 function setBB(id,canAfford,canAct){
   const b=document.getElementById(id);
@@ -1253,6 +1298,10 @@ function setMobBuildMode(mode) {
     robber:               skinLabel('mob_build_label_robber',     skinLabel('robber', t('mob_build_label_robber')   || 'Tap a hex for the robber')),
     road_initial:         skinLabel('mob_build_label_road',       skinLabel('road', t('mob_build_label_road')       || 'Tap an edge for the road')),
     settlement_initial:   skinLabel('mob_build_label_settlement', skinLabel('settlement', t('mob_build_label_settlement') || 'Tap a vertex for the settlement')),
+    knight:               t('mob_build_label_knight')            || 'Tocca un incrocio collegato a una tua strada',
+    knight_move_target:   t('ck_pick_destination')                || 'Scegli la destinazione sulla mappa',
+    knight_chase_target:  t('ck_pick_hex')                        || "Scegli l'esagono su cui spostare il brigante",
+    knight_displace_target: t('ck_pick_enemy')                    || 'Scegli il cavaliere nemico da respingere',
   };
   if(mode){
     banner.textContent=labels[mode]||'';
@@ -1325,6 +1374,8 @@ document.getElementById('mob-btn-settlement').addEventListener('click',()=>{
 });
 document.getElementById('mob-btn-city')      .addEventListener('click',()=>toggleBuildMode('city'));
 document.getElementById('mob-btn-devcard')   .addEventListener('click',()=>send({type:'BUY_DEV_CARD'}));
+document.getElementById('mob-btn-knight')?.addEventListener('click', showMobKnightsModal);
+document.getElementById('mob-btn-improve')?.addEventListener('click', showMobImprovementsModal);
 document.getElementById('mob-btn-roll')      .addEventListener('click',()=>send({type:'ROLL_DICE'}));
 document.getElementById('mob-btn-end-turn')  .addEventListener('click',()=>{
   setMobBuildMode(null);
@@ -1391,6 +1442,7 @@ function renderBoardCanvas() {
   drawBoardHexes();
   drawBoardEdges();
   drawBoardVertices();
+  drawBoardKnights();
   drawBoardPorts();
   drawBoardRobber();
 }
@@ -1522,6 +1574,7 @@ function drawBoardVertices() {
     const x=bpx(v.x), y=bpy(v.y);
     const hlSett = (mobBuildMode==='settlement'||mobBuildMode==='settlement_initial') && isValidSettlementV(v.id);
     const hlCity = mobBuildMode==='city' && isValidCityV(v.id);
+    const hlKnight = mobBuildMode==='knight' && isValidKnightV(v.id);
     if (v.building) {
       const col=state.players[v.owner].color;
       if (hlCity) {
@@ -1534,6 +1587,69 @@ function drawBoardVertices() {
       bctx.beginPath(); bctx.arc(x,y,hs*.14,0,Math.PI*2);
       bctx.fillStyle='rgba(255,220,50,.88)'; bctx.fill();
       bctx.strokeStyle='#fff'; bctx.lineWidth=1.5; bctx.stroke();
+    } else if (hlKnight) {
+      bctx.beginPath(); bctx.arc(x,y,hs*.15,0,Math.PI*2);
+      bctx.fillStyle='rgba(200,164,74,.85)'; bctx.fill();
+      bctx.strokeStyle='#fff'; bctx.lineWidth=1.5; bctx.stroke();
+    }
+  }
+}
+
+// ── Cities & Knights: knight pieces on the board ────────────────────
+const MOB_KNIGHT_EMOJI = { basic: '🛡️', strong: '⚔️', mighty: '🐎' };
+const MOB_RANK_VAL = { basic:1, strong:2, mighty:3 };
+function drawBoardKnights() {
+  if (!state?.citiesKnights) return;
+  const hs=HS();
+
+  // Highlight valid retreat spots when a displacement is awaiting a choice
+  if (state.pendingKnightDisplace) {
+    for (const vid of state.pendingKnightDisplace.options) {
+      const v=state.board.vertices[vid]; const x=bpx(v.x), y=bpy(v.y);
+      bctx.beginPath(); bctx.arc(x,y,hs*.18,0,Math.PI*2);
+      bctx.strokeStyle='rgba(255,220,50,.9)'; bctx.lineWidth=hs*.06; bctx.stroke();
+    }
+  }
+  // Highlight valid targets while a move/displace action is being aimed
+  if (mobBuildMode==='knight_move_target' || mobBuildMode==='knight_displace_target') {
+    const fromVertex = state.board.vertices[knightActionFrom];
+    if (fromVertex) {
+      const myKnight = state.players[MY_PLAYER_ID]?.knights?.find(k=>k.vertexId===knightActionFrom);
+      for (const eid of fromVertex.adjEdges) {
+        const e=state.board.edges[eid];
+        const otherId = e.v1===knightActionFrom ? e.v2 : e.v1;
+        const other = state.board.vertices[otherId];
+        let valid=false;
+        if (mobBuildMode==='knight_move_target') {
+          valid = e.owner===MY_PLAYER_ID && other.owner===null && !state.players.some(p=>(p.knights||[]).some(k=>k.vertexId===otherId));
+        } else if (myKnight) {
+          const enemy = state.players.find(p => p.id!==MY_PLAYER_ID && (p.knights||[]).some(k=>k.vertexId===otherId));
+          const enemyKnight = enemy?.knights.find(k=>k.vertexId===otherId);
+          valid = e.owner!==null && !!enemyKnight && MOB_RANK_VAL[myKnight.rank] > MOB_RANK_VAL[enemyKnight.rank];
+        }
+        if (valid) {
+          const x=bpx(other.x), y=bpy(other.y);
+          bctx.beginPath(); bctx.arc(x,y,hs*.18,0,Math.PI*2);
+          bctx.strokeStyle='rgba(200,164,74,.9)'; bctx.lineWidth=hs*.06; bctx.stroke();
+        }
+      }
+    }
+  }
+
+  for (const player of state.players) {
+    for (const knight of (player.knights || [])) {
+      const v = state.board.vertices[knight.vertexId];
+      if (!v) continue;
+      const x=bpx(v.x), y=bpy(v.y);
+      const r = hs*.22;
+      bctx.save();
+      if (!knight.active) bctx.globalAlpha = .55;
+      bctx.beginPath(); bctx.arc(x,y,r,0,Math.PI*2);
+      bctx.fillStyle = player.color; bctx.fill();
+      bctx.strokeStyle='#fff'; bctx.lineWidth=2; bctx.stroke();
+      bctx.font=`${r*1.3}px serif`; bctx.textAlign='center'; bctx.textBaseline='middle';
+      bctx.fillText(MOB_KNIGHT_EMOJI[knight.rank] || '🛡️', x, y);
+      bctx.restore();
     }
   }
 }
@@ -1652,6 +1768,13 @@ function isValidCityV(vid) {
   const v=state.board.vertices[vid];
   return v.owner===MY_PLAYER_ID && v.building==='settlement';
 }
+function isValidKnightV(vid) {
+  if (!state||state.phase!=='main'||!state.citiesKnights) return false;
+  const v=state.board.vertices[vid];
+  if (v.owner!==null) return false;
+  if (state.players.some(p => (p.knights||[]).some(k=>k.vertexId===vid))) return false;
+  return v.adjEdges.some(eid=>state.board.edges[eid].owner===MY_PLAYER_ID);
+}
 
 // ── Touch handling on board canvas ───────────────────────────────
 boardCanvas.addEventListener('touchstart', onBoardTouchStart, {passive:false});
@@ -1729,7 +1852,21 @@ function onBoardTouchEnd(e) {
 }
 
 function handleBoardTap(cx, cy) {
-  if (!state || !mobBuildMode) return;
+  if (!state) return;
+
+  // Knight-displacement retreat: resolved unconditionally (no build mode
+  // needed) by the displaced player tapping one of the highlighted options —
+  // mirrors the web client's click handling for this same pending state.
+  if (state.pendingKnightDisplace?.playerId === MY_PLAYER_ID) {
+    const v = findTappedVertex(cx,cy);
+    if (v && state.pendingKnightDisplace.options.includes(v.id)) {
+      send({type:'RESOLVE_KNIGHT_DISPLACE', vertexId:v.id});
+      document.getElementById('mob-build-banner').classList.add('hidden');
+    }
+    return;
+  }
+
+  if (!mobBuildMode) return;
 
   if (mobBuildMode==='robber') {
     const hex=findTappedHex(cx,cy);
@@ -1776,6 +1913,30 @@ function handleBoardTap(cx, cy) {
       send({type:'BUILD_CITY', vertexId:v.id});
       setMobBuildMode(null);
     }
+    return;
+  }
+
+  if (mobBuildMode==='knight') {
+    const v=findTappedVertex(cx,cy);
+    if (v && isValidKnightV(v.id)) {
+      send({type:'BUILD_KNIGHT', vertexId:v.id});
+      setMobBuildMode(null);
+    }
+    return;
+  }
+  if (mobBuildMode==='knight_move_target') {
+    const v=findTappedVertex(cx,cy);
+    if (v) { send({type:'MOVE_KNIGHT', fromVertexId:knightActionFrom, toVertexId:v.id}); setMobBuildMode(null); knightActionFrom=null; }
+    return;
+  }
+  if (mobBuildMode==='knight_chase_target') {
+    const h=findTappedHex(cx,cy);
+    if (h) { send({type:'CHASE_ROBBER_KNIGHT', vertexId:knightActionFrom, newHexId:h.id}); setMobBuildMode(null); knightActionFrom=null; }
+    return;
+  }
+  if (mobBuildMode==='knight_displace_target') {
+    const v=findTappedVertex(cx,cy);
+    if (v) { send({type:'DISPLACE_KNIGHT', fromVertexId:knightActionFrom, targetVertexId:v.id}); setMobBuildMode(null); knightActionFrom=null; }
     return;
   }
 }
@@ -2115,6 +2276,164 @@ function showDefenderColorChoice(playerId) {
 window.pickMobDefenderColor = (playerId, color) => {
   send({ type: 'CHOOSE_DEFENDER_PROGRESS', playerId, color });
   closeMobModal('mob-modal-defender-choice');
+};
+
+// ── Cities & Knights: knight recruitment + management (mobile) ─────
+const MOB_KNIGHT_RANKS = ['basic','strong','mighty'];
+const MOB_KNIGHT_RANK_VAL = { basic:1, strong:2, mighty:3 };
+function showMobKnightsModal() {
+  document.getElementById('mob-knights-title').textContent = t('mob_knights_title') || 'I tuoi Cavalieri';
+  renderMobKnightsList();
+  openMobModal('mob-modal-knights');
+}
+function renderMobKnightsList() {
+  const me = state.players[MY_PLAYER_ID];
+  const canAffordBuild = (me.resources.sheep||0)>=1 && (me.resources.ore||0)>=1;
+  const basicCount = (me.knights||[]).filter(k=>k.rank==='basic').length;
+  const canBuild = canAffordBuild && basicCount < 2 && state.diceRolled;
+  const buildRow = `<button class="mob-city-choice-btn" ${canBuild?'':'disabled style="opacity:.4"'} onclick="mobStartBuildKnight()">
+    ➕ ${t('mob_build_knight')||'Costruisci nuovo cavaliere'} <small>(1🐑1🪨)</small>
+  </button>`;
+  const rows = (me.knights||[]).map(k => {
+    const rankName = t(`ck_knight_${k.rank}`) || k.rank;
+    const status = k.active ? (t('ck_active')||'Attivo') : (t('ck_inactive')||'Inattivo');
+    return `<button class="mob-city-choice-btn" onclick="showMobKnightActions(${k.vertexId})">
+      <span class="mob-knight-row${k.active?'':' inactive'}">
+        <span class="mob-knight-info">${MOB_KNIGHT_EMOJI[k.rank]||'🛡️'} ${rankName}</span>
+        <small>${status}</small>
+      </span>
+    </button>`;
+  }).join('');
+  document.getElementById('mob-knights-list').innerHTML = buildRow + rows;
+}
+window.mobStartBuildKnight = () => {
+  closeMobModal('mob-modal-knights');
+  setMobBuildMode('knight');
+};
+window.showMobKnightActions = vertexId => {
+  const me = state.players[MY_PLAYER_ID];
+  const knight = me.knights?.find(k=>k.vertexId===vertexId);
+  if (!knight) return;
+  const idx = MOB_KNIGHT_RANKS.indexOf(knight.rank);
+  const vertex = state.board.vertices[vertexId];
+  const politicsLvl = me.cityImprovements?.politics || 0;
+  const canAffordActivate = (me.resources.wheat||0) >= 1;
+  const canAffordPromote  = (me.resources.sheep||0)>=1 && (me.resources.ore||0)>=1;
+  const adjacentToRobber = vertex.adjHexes.includes(state.robberHexId);
+  let canDisplace = false;
+  for (const eid of vertex.adjEdges) {
+    const e = state.board.edges[eid];
+    if (e.owner === null) continue;
+    const otherId = e.v1===vertexId ? e.v2 : e.v1;
+    for (const p of state.players) {
+      if (p.id === MY_PLAYER_ID) continue;
+      const ek = p.knights?.find(k=>k.vertexId===otherId);
+      if (ek && MOB_KNIGHT_RANK_VAL[knight.rank] > MOB_KNIGHT_RANK_VAL[ek.rank]) { canDisplace = true; break; }
+    }
+    if (canDisplace) break;
+  }
+
+  const rankName = t(`ck_knight_${knight.rank}`) || knight.rank;
+  const actions = [];
+  if (!knight.active) {
+    actions.push(`<button class="mob-city-choice-btn" ${canAffordActivate?'':'disabled style="opacity:.4"'} onclick="mobKnightAction('activate',${vertexId})">🌾 ${t('ck_activate')||'Attiva'} <small>(1🌾)</small></button>`);
+  }
+  if (idx < MOB_KNIGHT_RANKS.length - 1) {
+    const nextRank = MOB_KNIGHT_RANKS[idx+1];
+    const politicsBlocked = nextRank==='mighty' && politicsLvl < 3;
+    const disabled = politicsBlocked || !canAffordPromote;
+    const reason = politicsBlocked ? (t('ck_need_politics')||'Richiede Politica liv.3')
+                 : (!canAffordPromote ? (t('ck_missing')||'risorse insufficienti') : '');
+    actions.push(`<button class="mob-city-choice-btn" ${disabled?'disabled style="opacity:.4"':''} onclick="mobKnightAction('promote',${vertexId})">⬆️ ${t('ck_promote')||'Promuovi'} <small>(1🐑1🪨)</small>${reason?`<br><small>${reason}</small>`:''}</button>`);
+  }
+  if (knight.active && !knight.usedActionThisTurn) {
+    actions.push(`<button class="mob-city-choice-btn" onclick="mobKnightStartMove(${vertexId})">🚶 ${t('ck_move')||'Muovi'}</button>`);
+    if (adjacentToRobber) actions.push(`<button class="mob-city-choice-btn" onclick="mobKnightStartChase(${vertexId})">🦹 ${t('ck_chase_robber')||'Scaccia il Brigante'}</button>`);
+    if (canDisplace) actions.push(`<button class="mob-city-choice-btn" onclick="mobKnightStartDisplace(${vertexId})">⚔️ ${t('ck_displace')||'Respingi Cavaliere'}</button>`);
+  }
+  if (!actions.length) actions.push(`<div style="color:#c8b080;font-size:.8rem">${t('ck_no_actions')||'Nessuna azione disponibile per questo cavaliere ora'}</div>`);
+
+  const backRow = `<button class="mob-city-choice-btn" onclick="renderMobKnightsList()">← ${t('cancel_btn')||'Indietro'}</button>`;
+  document.getElementById('mob-knights-title').textContent = `${MOB_KNIGHT_EMOJI[knight.rank]||'🛡️'} ${rankName}`;
+  document.getElementById('mob-knights-list').innerHTML = actions.join('') + backRow;
+};
+window.mobKnightAction = (action, vertexId) => {
+  if (action==='activate') send({ type:'ACTIVATE_KNIGHT', vertexId });
+  else if (action==='promote') send({ type:'PROMOTE_KNIGHT', vertexId });
+  // Refresh in place once the broadcast lands (handled by the state-update
+  // sync below); if the modal is still open, re-show this knight's actions.
+  setTimeout(() => {
+    const stillOwned = state.players[MY_PLAYER_ID]?.knights?.some(k=>k.vertexId===vertexId);
+    if (stillOwned && document.getElementById('mob-modal-knights').classList.contains('open')) {
+      showMobKnightActions(vertexId);
+    }
+  }, 150);
+};
+window.mobKnightStartMove = vertexId => {
+  knightActionFrom = vertexId;
+  closeMobModal('mob-modal-knights');
+  setMobBuildMode('knight_move_target');
+};
+window.mobKnightStartChase = vertexId => {
+  knightActionFrom = vertexId;
+  closeMobModal('mob-modal-knights');
+  setMobBuildMode('knight_chase_target');
+};
+window.mobKnightStartDisplace = vertexId => {
+  knightActionFrom = vertexId;
+  closeMobModal('mob-modal-knights');
+  setMobBuildMode('knight_displace_target');
+};
+
+// ── Cities & Knights: city improvements (mobile) ────────────────────
+const MOB_CK_TRACKS = [
+  { id: 'trade',    commodity: 'cloth', icon: '⚖️' },
+  { id: 'politics', commodity: 'coin',  icon: '👑' },
+  { id: 'science',  commodity: 'paper', icon: '🔬' }
+];
+function showMobImprovementsModal() {
+  renderMobImprovementsList();
+  openMobModal('mob-modal-improvements');
+}
+function renderMobImprovementsList() {
+  const p = state.players[MY_PLAYER_ID];
+  document.getElementById('mob-improvements-list').innerHTML = MOB_CK_TRACKS.map(tr => {
+    const level = p.cityImprovements?.[tr.id] || 0;
+    const have  = p.commodities?.[tr.commodity] || 0;
+    const maxed = level >= 5;
+    const nextLevel = level + 1;
+    const cost = nextLevel;
+    const holder = state.metropolises?.[tr.id] || null;
+    const holderLevel = holder ? (state.players[holder.playerId]?.cityImprovements?.[tr.id] || 0) : 0;
+    const grantsMetro = (!holder || holder.playerId !== p.id) && nextLevel > holderLevel;
+    const metroVertices = new Set(Object.values(state.metropolises||{}).filter(Boolean).map(m => m.vertexId));
+    const hasAvailableCity = (p.cities||[]).some(v => !metroVertices.has(v));
+    const needsCity = nextLevel >= 4 && grantsMetro && !hasAvailableCity;
+    const cantAfford = have < cost;
+    const disabled = maxed || needsCity || cantAfford;
+    const holdsMetro = holder?.playerId === p.id;
+    const dots = Array.from({length:5}, (_,i)=>`<span class="ck-dot${i<level?' filled':''}" style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:3px;background:${i<level?'#f0c040':'rgba(255,255,255,.2)'}"></span>`).join('');
+    const trackName = t(`ck_track_${tr.id}`) || tr.id;
+    let reason = '';
+    if (maxed) reason = t('ck_maxed') || 'MAX';
+    else if (needsCity) reason = t('ck_need_city') || 'Serve una città non-metropoli';
+    else if (cantAfford) reason = `${MOB_CK_COMMODITY_ICON[tr.commodity]} ${cost-have} ${t('ck_missing')||'mancanti'}`;
+    return `<div class="mob-city-choice-btn" style="display:flex;flex-direction:column;gap:6px;align-items:stretch;${disabled?'opacity:.7':''}">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <span>${tr.icon} ${trackName} ${holdsMetro?'🏛️':''}</span>
+        <span>${dots}</span>
+      </div>
+      <button class="mob-big-btn ${disabled?'grey':'green'}" ${disabled?'disabled':''} onclick="mobBuyCityImprovement('${tr.id}')" style="margin-top:0">
+        ${maxed ? (t('ck_maxed')||'MAX') : `${t('ck_buy')||'Compra'} ${MOB_CK_COMMODITY_ICON[tr.commodity]}${cost} (hai ${have})`}
+      </button>
+      ${(!maxed && disabled) ? `<small style="color:#e08080">${reason}</small>` : ''}
+    </div>`;
+  }).join('');
+}
+window.mobBuyCityImprovement = track => {
+  send({ type: 'BUY_CITY_IMPROVEMENT', track });
+  // Re-rendered by the state-update handler on the next broadcast (never
+  // optimistically from local state — see the equivalent web fix).
 };
 
 function showTradeAccept(trade){

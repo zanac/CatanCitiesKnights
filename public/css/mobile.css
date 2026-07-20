@@ -158,6 +158,10 @@ html, body {
 .mob-build-btn:disabled { opacity:.25; cursor:not-allowed; }
 .mob-build-btn.end { background:rgba(200,100,20,.3); border-color:rgba(200,100,20,.5); }
 .mob-build-btn.end:active { background:rgba(200,100,20,.5); }
+.mob-build-btn.mob-ck-only.hidden { display:none; }
+.mob-knight-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+.mob-knight-row .mob-knight-info { display:flex; align-items:center; gap:8px; }
+.mob-knight-row.inactive { opacity:.6; }
 
 /* ── Big button ── */
 .mob-big-btn {

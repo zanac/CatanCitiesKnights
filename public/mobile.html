@@ -173,6 +173,8 @@
             <button id="mob-btn-settlement" class="mob-build-btn">🏠<span data-t="mob_settlement" data-skin-label="settlement">Settlement</span><small data-res-cost="wood,brick,sheep,wheat">🪵🧱🐑🌾</small></button>
             <button id="mob-btn-city"       class="mob-build-btn">🏙<span data-t="mob_city" data-skin-label="city">City</span><small data-res-cost="wheat,wheat,ore,ore,ore">🌾🌾🪨🪨🪨</small></button>
             <button id="mob-btn-devcard"    class="mob-build-btn">🃏<span data-t="mob_devcard">Dev Card</span><small data-res-cost="sheep,wheat,ore">🐑🌾🪨</small></button>
+            <button id="mob-btn-knight"      class="mob-build-btn mob-ck-only hidden">⚔️<span data-t="mob_knight">Cavalieri</span><small data-res-cost="sheep,ore">🐑🪨</small></button>
+            <button id="mob-btn-improve"     class="mob-build-btn mob-ck-only hidden">🏛<span data-t="mob_improve">Migliora</span></button>
             <button id="mob-btn-bank"       class="mob-build-btn">🏦<span data-t="mob_bank">Bank</span></button>
             <button id="mob-btn-player"     class="mob-build-btn">🤝<span data-t="mob_trade">Trade</span></button>
             <button id="mob-btn-play-dev"   class="mob-build-btn">🃏<span data-t="mob_use_card">Play Card</span></button>
@@ -260,6 +262,22 @@
       <div class="mob-modal-drag"></div>
       <h2>🛡️ <span data-t="ck_defender_tie_prompt">Tie for Defender of Catan — pick a progress card color</span></h2>
       <div id="mob-defender-choice-list" class="mob-city-choice-list"></div>
+    </div>
+  </div>
+
+  <div id="mob-modal-knights" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2>⚔️ <span id="mob-knights-title" data-t="mob_knights_title">I tuoi Cavalieri</span></h2>
+      <div id="mob-knights-list" class="mob-city-choice-list"></div>
+    </div>
+  </div>
+
+  <div id="mob-modal-improvements" class="mob-modal">
+    <div class="mob-modal-inner">
+      <div class="mob-modal-drag"></div>
+      <h2>🏛 <span data-t="mob_improvements_title">Miglioramenti Città</span></h2>
+      <div id="mob-improvements-list" class="mob-city-choice-list"></div>
     </div>
   </div>
 
