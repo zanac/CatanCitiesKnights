@@ -281,6 +281,7 @@ function onMessage(data) {
   const prevPendingSteal  = state?.pendingSteal || false;
   const prevPendingRobber = state?.pendingRobber || false;
   const prevResources     = state ? state.players.map(p => ({...p.resources})) : null;
+  const prevCommodities   = state ? state.players.map(p => ({...(p.commodities||{})})) : null;
   const prevLastDrawn    = state?.lastDrawnCard || null;
   const prevMaxProgressSeq = Math.max(0, ...((state?.lastDrawnProgressCards)||[]).map(d => d.seq||0));
   const prevSpecials     = state ? state.players.map(p => ({
@@ -364,10 +365,16 @@ function onMessage(data) {
     try {
       const deltas = {};
       let anyChange = false;
+      const trackedKeys = state.citiesKnights
+        ? ['wood','brick','sheep','wheat','ore','paper','cloth','coin']
+        : ['wood','brick','sheep','wheat','ore'];
       for (const p of state.players) {
         deltas[p.id] = {};
-        for (const res of ['wood','brick','sheep','wheat','ore']) {
-          const diff = (p.resources[res]||0) - (prevResources[p.id][res]||0);
+        for (const res of trackedKeys) {
+          const isCom = ['paper','cloth','coin'].includes(res);
+          const cur  = isCom ? (p.commodities?.[res]||0) : (p.resources[res]||0);
+          const prev = isCom ? (prevCommodities?.[p.id]?.[res]||0) : (prevResources[p.id][res]||0);
+          const diff = cur - prev;
           if (diff !== 0) { deltas[p.id][res] = diff; anyChange = true; }
         }
       }
@@ -378,12 +385,17 @@ function onMessage(data) {
   if (!isFirstUpdate && prevPendingTrade && !state.pendingTrade &&
       prevPendingTrade.fromId === MY_PLAYER_ID && prevResources) {
     const toPlayer = state.players[prevPendingTrade.toId];
-    // Check if resources actually changed (accepted) or not (rejected)
+    // Check if resources actually changed (accepted) or not (rejected).
+    // Cities & Knights trades can be commodities-only, so check those too.
     let changed = false;
-    for (const res of ['wood','brick','sheep','wheat','ore']) {
-      if ((state.players[MY_PLAYER_ID]?.resources[res]||0) !== (prevResources[MY_PLAYER_ID]?.[res]||0)) {
-        changed = true; break;
-      }
+    const checkKeys = state.citiesKnights
+      ? ['wood','brick','sheep','wheat','ore','paper','cloth','coin']
+      : ['wood','brick','sheep','wheat','ore'];
+    for (const res of checkKeys) {
+      const isCom = ['paper','cloth','coin'].includes(res);
+      const cur  = isCom ? (state.players[MY_PLAYER_ID]?.commodities?.[res]||0) : (state.players[MY_PLAYER_ID]?.resources[res]||0);
+      const prev = isCom ? (prevCommodities?.[MY_PLAYER_ID]?.[res]||0) : (prevResources[MY_PLAYER_ID]?.[res]||0);
+      if (cur !== prev) { changed = true; break; }
     }
     if (changed) {
       showMobToast(t('trade_accepted_toast', escHtml(toPlayer?.name||'?')), 2500, 'toast-ok');
@@ -414,7 +426,8 @@ function showMobPlayersSummary() {
   content.innerHTML = state.players.map(p => {
     const isMe = p.id === MY_PLAYER_ID;
     const isCur = p.id === curIdx;
-    const totalCards = Object.values(p.resources).reduce((a,b) => a+b, 0);
+    const totalCards = Object.values(p.resources).reduce((a,b) => a+b, 0)
+      + (state.citiesKnights ? Object.values(p.commodities||{}).reduce((a,b) => a+b, 0) : 0);
     const devCount = p.devCards?.length || 0;
 
     // Badges
@@ -429,7 +442,10 @@ function showMobPlayersSummary() {
           ['wood','brick','sheep','wheat','ore'].map(r => {
             const n = p.resources[r] || 0;
             return `<span style="background:rgba(255,255,255,.08);border-radius:6px;padding:2px 7px;font-size:.82rem">${resEmoji(r)} ${n}</span>`;
-          }).join('')
+          }).join('') + (state.citiesKnights ? MOB_CK_COMMODITIES.map(c => {
+            const n = p.commodities?.[c] || 0;
+            return `<span style="background:rgba(255,255,255,.08);border-radius:6px;padding:2px 7px;font-size:.82rem">${MOB_CK_COMMODITY_ICON[c]} ${n}</span>`;
+          }).join('') : '')
         }</div>`
       : `<div style="color:#888;font-size:.82rem;margin-top:4px">🃏 ${totalCards} ${t('cards')||'carte'}</div>`;
 
@@ -982,13 +998,20 @@ function updateMyResources() {
     const n=me.resources[r]||0;
     return `<div class="mob-res-pill"><span>${resEmoji(r)}</span><span class="n">${n}</span></div>`;
   }).join('');
+  // Cities & Knights: commodity pills (missing here before — this is the
+  // resource bar shown on the active/my-turn screen, distinct from the one
+  // on the wait screen which already included them)
+  const comPills = state?.citiesKnights ? MOB_CK_COMMODITIES.map(c => {
+    const n = me.commodities?.[c]||0;
+    return `<div class="mob-res-pill"><span>${MOB_CK_COMMODITY_ICON[c]}</span><span class="n">${n}</span></div>`;
+  }).join('') : '';
   // Medal badges
   const medals = [
     me.hasLongestRoad ? `<span class="mob-medal road-medal" title="${skinLabel('longest_road','Longest Road')}">${skinLabel('longest_road_emoji','🛤')}🥇</span>` : '',
     me.hasLargestArmy ? `<span class="mob-medal army-medal" title="${skinLabel('largest_army','Largest Army')}">${skinLabel('largest_army_emoji','⚔️')}🥇</span>` : '',
     (me.knightsPlayed||0)>0 && !me.hasLargestArmy ? `<span class="mob-medal knight-count">⚔️×${me.knightsPlayed}</span>` : '',
   ].join('');
-  el.innerHTML = pills + (medals ? `<div class="mob-medals-row">${medals}</div>` : '');
+  el.innerHTML = pills + comPills + (medals ? `<div class="mob-medals-row">${medals}</div>` : '');
 }
 
 // ── Action panel ──────────────────────────────────────────────────
@@ -2476,9 +2499,10 @@ function showMobStealDelta(deltas) {
     const pid = parseInt(pidStr);
     const p = state.players[pid];
     if (!p) continue;
-    const parts = Object.entries(res).map(([r, d]) =>
-      `${d > 0 ? '+' : ''}${d}${resEmoji(r)}`
-    ).join(' ');
+    const parts = Object.entries(res).map(([r, d]) => {
+      const icon = MOB_CK_COMMODITY_ICON[r] || resEmoji(r);
+      return `${d > 0 ? '+' : ''}${d}${icon}`;
+    }).join(' ');
     lines.push(`<span style="color:${p.color}">${escHtml(p.name)}</span> ${parts}`);
   }
   if (!lines.length) return;
